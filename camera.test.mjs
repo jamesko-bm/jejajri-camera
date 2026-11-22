@@ -1,7 +1,34 @@
 import {test} from 'node:test';import assert from 'node:assert/strict';
 import {decreasingBooks,RecognitionGate,frameDifference,cameraCandidates,refineBookEdges} from './dist/camera-core.mjs';
 import {readFileSync} from 'node:fs';
+import {readLabels} from './dist/labels.mjs';
+import {recognizeLabels} from './dist/recognition.mjs';
 const book=(classification,id=classification,author='김10',volume='1')=>({id,classification,author,volume,bbox:[0,0,100,100]});
+const word=(text,x,y,width=55,height=18)=>({text,confidence:95,bbox:{x0:x,y0:y,x1:x+width,y1:y+height}});
+test('real label format: jamo, split tokens, decimals and badges',()=>{
+ const words=[word('004',20,100,26),word('.',47,101,3),word('59',52,100,20),word('이',20,127,14),word('64',36,124,20,25),word('ㄷ',58,129,12,12),word('005.13',150,108),word('이211ㅋ',150,134),word('004.73',280,116),word('진91ㅋ',280,142),word('신간',150,60),word('신간',280,60),...Array.from({length:5},(_,i)=>word('000',20+i*70,210,55,35))];
+ const books=readLabels(words,400,300);
+ assert.deepEqual(books.map(b=>b.classification),['004.59','005.13','004.73']);
+ assert.deepEqual(books.map(b=>b.author),['이64ㄷ','이211ㅋ','진91ㅋ']);
+ assert.deepEqual(decreasingBooks(books).flagged.map(b=>b.classification),['005.13']);
+ assert.ok(books.every(b=>b.volume===''));
+});
+test('000 with an author is a real label; unsupported numeric badges alone are not',()=>{
+ assert.deepEqual(readLabels([word('000',20,100),word('000',150,100)],300,250),[]);
+ const books=readLabels([word('000',20,100),word('김1ㄱ',20,125),word('001',150,100),word('박2ㅎ',150,125)],300,250);
+ assert.equal(books[0].classification,'000');assert.equal(decreasingBooks(books).complete,true);
+});
+test('same class compares full jamo author, including numeric suffix',()=>{
+ assert.equal(decreasingBooks([book('004.59','a','김94ㅎ'),book('004.59','b','김94ㄱ2')]).flagged[0].id,'a');
+ assert.equal(decreasingBooks([book('004.59','a','김94ㄱ2'),book('004.59','b','김94ㄱ10')]).flagged.length,0);
+});
+test('conflicting crop OCR blocks affected pairs, preserves an independently confirmed decrease',async()=>{
+ const full=[word('004.59',20,100),word('이64ㄷ',20,125),word('004.54',150,100),word('나31ㅇ',150,125),word('005.13',280,100),word('이211ㅋ',280,125),word('004.73',410,100),word('진91ㅋ',410,125)];
+ let calls=0;const engine={setParameters:async()=>{},recognize:async()=>({data:{words:calls++===0?full:[word(['004.59','004.5','005.13','004.73'][calls-2],20,100),word('김1ㄱ',20,125)]}})};
+ const books=await recognizeLabels(engine,'image',500,300),result=decreasingBooks(books);
+ assert.equal(books[1].uncertain,true);assert.equal(result.complete,false);assert.deepEqual(result.flagged.map(b=>b.classification),['005.13']);
+ calls=0;const stale=await recognizeLabels(engine,'image',500,300,()=>false);assert.deepEqual(stale,[]);assert.equal(calls,1);
+});
 test('decreases mark the preceding left book',()=>{const books=['100','180','410','300','320','400','500','900','600','800'].map(n=>book(n));const result=decreasingBooks(books);assert.deepEqual(result.flagged.map(b=>b.id),['410','900']);assert.equal(result.complete,true);});
 test('equal call numbers are allowed; each drop in a reverse run is marked',()=>{assert.equal(decreasingBooks([book('100'),book('100')]).flagged.length,0);assert.deepEqual(decreasingBooks(['300','200','100'].map(n=>book(n))).flagged.map(b=>b.id),['300','200']);});
 test('natural author and volume comparisons; absent fields do not invent order',()=>{assert.equal(decreasingBooks([book('100','a','김10'),book('100','b','김2')]).flagged[0].id,'a');assert.equal(decreasingBooks([book('100','a','김10','2'),book('100','b','김10','1')]).flagged[0].id,'a');assert.equal(decreasingBooks([book('100','a',''),book('100','b')]).complete,false);assert.equal(decreasingBooks([book('100')]).complete,false);assert.equal(decreasingBooks([book('100','a','김1',''),book('100','b','김1','')]).complete,true);assert.equal(decreasingBooks([book('100','a','김1',''),book('100','b','김1','2')]).complete,false);});

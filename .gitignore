@@ -6,3 +6,5 @@ node_modules/
 .openai/
 .env
 .env.*
+
+ocr-photo-check.mjs

@@ -1,10 +1,12 @@
-import {compare,candidates} from './ordering.mjs';
+import {compare} from './ordering.mjs';
+import {readLabels} from './labels.mjs';
 
 // A decrease flags the preceding (left) book, as requested by the user.
 export function decreasingBooks(books){
  const flagged=[],uncertain=[];
  for(let i=1;i<books.length;i++){
   const a=books[i-1],b=books[i];
+  if(a.uncertain||b.uncertain){uncertain.push(i);continue;}
   if(!/^\d{3}(?:\.\d+)?$/.test(a.classification)||!/^\d{3}(?:\.\d+)?$/.test(b.classification)) {uncertain.push(i);continue;}
   let result=compare({...a,author:'',volume:'1'},{...b,author:'',volume:'1'});
   if(!result){
@@ -40,18 +42,7 @@ export class RecognitionGate{
 }
 
 export function cameraCandidates(words,width,height){
- const valid=words.filter(w=>Number(w.confidence??100)>=45);
- const anchors=valid.filter(w=>/^\d{3}(?:\.\d+)?$/.test(w.text.trim()));
- // A single shelf at a time: choose the most populated classification row.
- let row=[];
- for(const anchor of anchors){const tolerance=Math.max(16,(anchor.bbox.y1-anchor.bbox.y0)*1.7);const group=anchors.filter(w=>Math.abs(w.bbox.y0-anchor.bbox.y0)<tolerance);if(group.length>row.length)row=group;}
- if(row.length<2)return [];
- const y0=Math.min(...row.map(w=>w.bbox.y0)),labelHeight=Math.max(...row.map(w=>w.bbox.y1-w.bbox.y0));
- const wordStrip=valid.filter(w=>w.bbox.y0>=y0-labelHeight*.35&&w.bbox.y0<=y0+labelHeight*5.5);
- const bottom=Math.min(height,Math.round(y0+labelHeight*5.8));
- const rows=candidates(wordStrip,[0,0,width,bottom]);
- // Requiring nearby author text suppresses isolated title-page numbers.
- return rows.map(b=>({...b,author:/^[가-힣A-Za-z][가-힣A-Za-z0-9.-]*$/.test(b.author)?b.author:'',volume:/^[1-9]\d*$/.test(b.volume)?b.volume:''}));
+ return readLabels(words,width,height);
 }
 
 export function refineBookEdges(books,image){
