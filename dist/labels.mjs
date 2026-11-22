@@ -23,7 +23,7 @@ export function readLabels(words,width,height,minLabels=2){
  anchors=anchors.filter(a=>!anchors.some(b=>b!==a&&b.text.length>a.text.length&&b.bbox.x0<=a.bbox.x0&&b.bbox.x1>=a.bbox.x1&&Math.abs(b.bbox.y0-a.bbox.y0)<3));
  const labels=anchors.map(a=>{
   const h=lineHeight(a),cx=center(a);
-  const nearby=authors.filter(b=>b.bbox.y0>=a.bbox.y1-h*.25&&b.bbox.y0<=a.bbox.y1+h*1.8&&Math.abs(center(b)-cx)<=Math.max(a.bbox.x1-a.bbox.x0,b.bbox.x1-b.bbox.x0)*.65);
+  const nearby=authors.filter(b=>b.bbox.x0>=a.bbox.x0-h*.8&&b.bbox.x0<=a.bbox.x1&&b.bbox.y0>=a.bbox.y1-h*.25&&b.bbox.y0<=a.bbox.y1+h*1.8&&Math.abs(center(b)-cx)<=Math.max(a.bbox.x1-a.bbox.x0,b.bbox.x1-b.bbox.x0)*.65);
   nearby.sort((b,c)=>Math.abs(center(b)-cx)+Math.abs(b.bbox.y0-a.bbox.y1)-Math.abs(center(c)-cx)-Math.abs(c.bbox.y0-a.bbox.y1)||c.text.length-b.text.length);
   const author=nearby[0];
   // Prefer the complete author span over a contained fragment.

@@ -3,8 +3,32 @@ import {decreasingBooks,RecognitionGate,frameDifference,cameraCandidates,refineB
 import {readFileSync} from 'node:fs';
 import {readLabels} from './dist/labels.mjs';
 import {recognizeLabels} from './dist/recognition.mjs';
+import {improveCameraFocus} from './dist/image-preparation.mjs';
 const book=(classification,id=classification,author='김10',volume='1')=>({id,classification,author,volume,bbox:[0,0,100,100]});
 const word=(text,x,y,width=55,height=18)=>({text,confidence:95,bbox:{x0:x,y0:y,x1:x+width,y1:y+height}});
+test('author spans never absorb text from the preceding book',()=>{
+ const words=[word('004.59',150,100),word('예',120,125,24),word('김',150,125,20),word('94',172,125,20),word('ㄱ2',194,125,20),word('005.13',280,100),word('이211ㅋ',280,125)];
+ assert.equal(readLabels(words,400,300)[0].author,'김94ㄱ2');
+});
+test('optional camera controls support continuous focus and tolerate rejection',async()=>{
+ let applied;await improveCameraFocus({getCapabilities:()=>({focusMode:['manual','continuous']}),applyConstraints:async c=>{applied=c;}});
+ assert.equal(applied.advanced[0].focusMode,'continuous');
+ await improveCameraFocus({});await improveCameraFocus({getCapabilities:()=>({focusMode:['continuous']}),applyConstraints:async()=>{throw Error('unsupported');}});
+});
+test('expanded search recovers missing labels and cancels before the next tile',async()=>{
+ const pair=[word('005.13',20,100),word('이211ㅋ',20,125),word('004.73',150,100),word('진91ㅋ',150,125)];
+ let calls=0;const engine={setParameters:async()=>{},recognize:async()=>({data:{words:++calls===2?pair:[]}})};
+ const prepare=()=>'';prepare.tiles=()=>[{image:'tile',mapWord:w=>w}];
+ const result=await recognizeLabels(engine,'full',300,250,()=>true,prepare);
+ assert.equal(result.length,2);assert.equal(decreasingBooks(result).flagged[0].classification,'005.13');
+ calls=0;assert.deepEqual(await recognizeLabels(engine,'full',300,250,()=>false,prepare),[]);assert.equal(calls,1);
+});
+test('line recovery restores a missing author without changing known classification',async()=>{
+ const pair=[word('005.13',20,100),word('004.73',150,100),word('진91ㅋ',150,125)];
+ let calls=0;const parameters=[];const engine={setParameters:async p=>parameters.push(p),recognize:async()=>({data:++calls===1?{words:pair}:calls===3?{text:'이211ㅋ',confidence:89}:{words:[]}})};
+ const result=await recognizeLabels(engine,'full',300,250,()=>true,()=> 'native-crop');
+ assert.equal(result[0].author,'이211ㅋ');assert.equal(result[0].classification,'005.13');assert.equal(parameters[0].tessedit_char_whitelist,'');
+});
 test('real label format: jamo, split tokens, decimals and badges',()=>{
  const words=[word('004',20,100,26),word('.',47,101,3),word('59',52,100,20),word('이',20,127,14),word('64',36,124,20,25),word('ㄷ',58,129,12,12),word('005.13',150,108),word('이211ㅋ',150,134),word('004.73',280,116),word('진91ㅋ',280,142),word('신간',150,60),word('신간',280,60),...Array.from({length:5},(_,i)=>word('000',20+i*70,210,55,35))];
  const books=readLabels(words,400,300);
