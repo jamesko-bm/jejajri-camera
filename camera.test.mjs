@@ -1,7 +1,7 @@
 import {test} from 'node:test';import assert from 'node:assert/strict';
 import {decreasingBooks,RecognitionGate,frameDifference,cameraCandidates,refineBookEdges} from './dist/camera-core.mjs';
 import {readFileSync} from 'node:fs';
-import {readLabels,normalizeAuthor,parseShelfText,repairClass} from './dist/labels.mjs';
+import {readLabels,normalizeAuthor,parseShelfText,repairClass,interpretCallNumber} from './dist/labels.mjs';
 import {recognizeLabels} from './dist/recognition.mjs';
 import {improveCameraFocus} from './dist/image-preparation.mjs';
 const book=(classification,id=classification,author='김10',volume='1')=>({id,classification,author,volume,bbox:[0,0,100,100]});
@@ -45,6 +45,15 @@ test('blurred author digits that start with 0 are read as 이',()=>{
  assert.deepEqual(parseShelfText('004.59 0164ㄷ'),{classification:'004.59',author:'이64ㄷ'});
  assert.deepEqual(parseShelfText('004.59 김94ㄱ2'),{classification:'004.59',author:'김94ㄱ2'});
  assert.equal(parseShelfText('0064.59 Bais').classification,'');
+ assert.equal(repairClass('05.13'),'005.13');
+ assert.deepEqual(interpretCallNumber('005.13','이211ㅋ'),{classification:'005.13',author:'이211ㅋ'});
+ assert.deepEqual(interpretCallNumber('004.73','진91ㅋ'),{classification:'004.73',author:'진91ㅋ'});
+ assert.deepEqual(interpretCallNumber('004.59','김94ㄱ2'),{classification:'004.59',author:'김94ㄱ2'});
+ assert.deepEqual(interpretCallNumber('김94ㄱ2','004.59'),{classification:'004.59',author:'김94ㄱ2'});
+ assert.deepEqual(interpretCallNumber('1004.59','1이64ㄷㄷ'),{classification:'004.59',author:'이64ㄷ'});
+ assert.deepEqual(interpretCallNumber('05.13\n이211ㅋ'),{classification:'005.13',author:'이211ㅋ'});
+ assert.deepEqual(interpretCallNumber('04.59','0164ㄷ'),{classification:'004.59',author:'이64ㄷ'});
+ assert.deepEqual(interpretCallNumber('4945.19','012113'),{classification:'',author:'이211ㅋ'});
  assert.equal(readLabels([word('004.59',20,100),word('0164ㄷ',20,125),word('004.73',180,100),word('진91ㅋ',180,125)],400,300)[0].author,'이64ㄷ');
 });
 test('real label format: jamo, split tokens, decimals and badges',()=>{

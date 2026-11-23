@@ -1,4 +1,11 @@
-import {readLabels,cleanLabel,isAuthor,normalizeAuthor,parseShelfText,repairClass} from './labels.mjs';
+import {readLabels,cleanLabel,isAuthor,normalizeAuthor,parseShelfText,interpretCallNumber} from './labels.mjs';
+
+const DIGIT_WHITELIST='0123456789.';
+const AUTHOR_WHITELIST=`0123456789.${Array.from({length:0x3163-0x3131+1},(_,i)=>String.fromCharCode(0x3131+i)).join('')}${Array.from({length:0xD7A3-0xAC00+1},(_,i)=>String.fromCharCode(0xAC00+i)).join('')}`;
+
+function preferFields(primary,extra){
+ return {classification:primary.classification||extra.classification||'',author:primary.author||extra.author||''};
+}
 
 function preferClass(a,b){
  if(!a)return b||'';
@@ -46,25 +53,45 @@ async function recognizeShelf(engine,prepare,width,height,isCurrent){
   if(!isCurrent())return [];
   if(!String(strip.image).startsWith('data:image'))continue;
   const lines=Array.isArray(strip.lines)?strip.lines:[];
-  let lineClass='',lineAuthor='';
+  const readLine=async (image,whitelist)=>{
+   await engine.setParameters({tessedit_pageseg_mode:'7',tessedit_char_whitelist:whitelist});
+   const {data:line}=await engine.recognize(image);
+   return interpretCallNumber(line?.text||'');
+  };
+  let parsed={classification:'',author:''},topWasClass=false,topAuthor='',confidence=0;
   if(lines[0]){
-   await engine.setParameters({tessedit_pageseg_mode:'7',tessedit_char_whitelist:'0123456789.'});
-   const {data:numberLine}=await engine.recognize(lines[0]);
-   lineClass=repairClass(numberLine.text||'');
+   if(!isCurrent())return [];
+   const top=await readLine(lines[0],DIGIT_WHITELIST);
+   topWasClass=!!top.classification;topAuthor=top.author;
+   parsed=preferFields(parsed,{classification:top.classification,author:''});
   }
   if(lines[1]){
-   await engine.setParameters({tessedit_pageseg_mode:'7',tessedit_char_whitelist:'0123456789이김나진허ㄱㄴㄷㄹㅁㅂㅅㅇㅈㅊㅋㅌㅍㅎ'});
-   const {data:authorLine}=await engine.recognize(lines[1]);
-   lineAuthor=normalizeAuthor(authorLine.text||'');
+   if(!isCurrent())return [];
+   parsed=preferFields(parsed,await readLine(lines[1],AUTHOR_WHITELIST));
   }
-  await engine.setParameters({tessedit_pageseg_mode:'11',tessedit_char_whitelist:''});
-  const {data}=(!lineClass||!lineAuthor)?await engine.recognize(strip.image):{data:{text:'',confidence:0}};
-  const local=words.filter(w=>w.bbox&&(w.bbox.x0+w.bbox.x1)/2>=strip.bbox[0]&&(w.bbox.x0+w.bbox.x1)/2<=strip.bbox[2]).sort((a,b)=>a.bbox.y0-b.bbox.y0||a.bbox.x0-b.bbox.x0).map(w=>w.text).join(' ');
-  const fromFull=parseShelfText(data.text||''),fromBand=parseShelfText(local);
-  const backup=preferClass(fromFull.classification,fromBand.classification)||fromFull.classification||fromBand.classification;
-  const classification=lineClass||(/^\d{3}\.\d{2}$/.test(backup)?backup:'');
-  const author=lineAuthor||fromFull.author||fromBand.author;
-  strips.push({classification,author,uncertain:!/^\d{3}\.\d{2}$/.test(classification)||!author,bbox:strip.bbox,confidence:data.confidence||0});
+  // Digit-only recovery of 이 belongs to the author line, after the real cutter is tried.
+  if(!parsed.author&&topAuthor&&!topWasClass)parsed=preferFields(parsed,{classification:'',author:topAuthor});
+  // The author line is the lower one, but a swapped crop still has to land on the cutter.
+  if(lines[0]&&!parsed.author&&!topWasClass){
+   if(!isCurrent())return [];
+   parsed=preferFields(parsed,await readLine(lines[0],AUTHOR_WHITELIST));
+  }
+  if(lines[1]&&!parsed.classification){
+   if(!isCurrent())return [];
+   parsed=preferFields(parsed,await readLine(lines[1],DIGIT_WHITELIST));
+  }
+  if(!parsed.classification||!parsed.author){
+   if(!isCurrent())return [];
+   await engine.setParameters({tessedit_pageseg_mode:'6',tessedit_char_whitelist:''});
+   const {data}=await engine.recognize(strip.image);
+   confidence=data.confidence||0;
+   parsed=preferFields(parsed,interpretCallNumber(data.text||''));
+   const local=words.filter(w=>w.bbox&&(w.bbox.x0+w.bbox.x1)/2>=strip.bbox[0]&&(w.bbox.x0+w.bbox.x1)/2<=strip.bbox[2]).sort((a,b)=>a.bbox.y0-b.bbox.y0||a.bbox.x0-b.bbox.x0).map(w=>w.text).join(' ');
+   const fromBand=parseShelfText(local);
+   if(!parsed.classification&&/^\d{3}\.\d{2}$/.test(fromBand.classification))parsed.classification=fromBand.classification;
+   if(!parsed.author&&fromBand.author)parsed.author=fromBand.author;
+  }
+  strips.push({classification:parsed.classification,author:parsed.author,uncertain:!/^\d{3}\.\d{2}$/.test(parsed.classification)||!parsed.author,bbox:strip.bbox,confidence});
  }
  return mergeShelf(books,strips);
 }

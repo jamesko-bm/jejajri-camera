@@ -131,6 +131,19 @@ function adaptiveTrim(source,x0,y0,x1,y1,makeCanvas){
  const cuts=[];
  let start=rows[0];
  for(let i=1;i<=rows.length;i++)if(rows.length&&(i===rows.length||rows[i]>rows[i-1]+3)){if(rows[i-1]-start>6)cuts.push([start,rows[i-1]]);start=rows[i];}
+ // A call number is two stacked lines. Split one tall block at the blank row between them.
+ if(cuts.length===1){
+  const [a,b]=cuts[0];
+  if(b-a>=36){
+   const from=a+Math.floor((b-a)*.28),to=a+Math.ceil((b-a)*.72);
+   let run=0,bestRun=0,bestAt=from;
+   for(let y=from;y<=to;y++){
+    if(rowInk[y]<=peak*.12){run++;if(run>bestRun){bestRun=run;bestAt=y-Math.floor((run-1)/2);}}
+    else run=0;
+   }
+   if(bestRun>=2&&bestAt-a>8&&b-bestAt>8)cuts.splice(0,1,[a,bestAt-1],[bestAt+1,b]);
+  }
+ }
  const lines=cuts.slice(0,2).map(([a,b])=>{
   const linePad=16,line=blank(makeCanvas,out.width,b-a+1+linePad*2),lctx=line.getContext('2d');
   lctx.fillStyle='white';lctx.fillRect(0,0,line.width,line.height);

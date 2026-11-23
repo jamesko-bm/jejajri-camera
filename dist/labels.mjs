@@ -1,6 +1,7 @@
 // Keep compatibility jamo (ㄱ, ㅋ, …); NFKC would change their ordering.
 export const cleanLabel = text => String(text).normalize('NFC').replace(/\s+/g,'').replace(/[．。]/g,'.');
-export const isAuthor = text => /^[가-힣]+\d+[ㄱ-ㅎㅏ-ㅣ0-9]*$/.test(text);
+// 저자기호는 한글, 숫자, 그리고 끝의 자모·숫자다. 예: 이211ㅋ, 진91ㅋ, 김94ㄱ2.
+export const isAuthor = text => /^[가-힣]{1,3}\d{1,4}(?:[ㄱ-ㅎㅏ-ㅣ]\d{0,3})?$/.test(text);
 // A leading 0 on an author line is the usual misread of 이, as in 0164ㄷ.
 function finishAuthor(compact){
  let body=compact.replace(/^1(?=[가-힣])/,'').replace(/([ㄱ-ㅎ])\1+$/,'$1').replace(/^[oO][lI]/,'01').replace(/^[oO](?=\d)/,'0');
@@ -13,15 +14,47 @@ function finishAuthor(compact){
  return isAuthor(body)?body:'';
 }
 export function normalizeAuthor(text){
- const compact=cleanLabel(text).replace(/[|丨]/g,'');
+ const compact=cleanLabel(text).replace(/[|丨\-‐‑–—/]/g,'');
  const closed=/^[0Oo]\d{3,}3$/.test(compact)?`${compact.slice(0,-1)}ㅋ`:compact;
  return finishAuthor(compact)||finishAuthor(compact.replace(/=+$/,'ㅋ'))||finishAuthor(closed);
 }
+// The upper line is NNN.NN. A leading 1 is a spine edge; 05.13 is a dropped 0.
+function takeClass(token){
+ const compact=cleanLabel(token).replace(/[|丨]/g,'').replace(/\.+$/,'');
+ if(!compact)return {classification:'',rest:''};
+ const lead=compact.match(/^1(0\d{2}\.\d{2})(?!\d)(.*)$/);
+ if(lead)return {classification:lead[1],rest:lead[2]};
+ const exact=compact.match(/^(\d{3}\.\d{2})(?!\d)(.*)$/);
+ if(exact)return {classification:exact[1],rest:exact[2]};
+ const dropped=compact.match(/^(0[1-9]\.\d{2})(?!\d)(.*)$/);
+ if(dropped)return {classification:`0${dropped[1]}`,rest:dropped[2]};
+ return {classification:'',rest:compact};
+}
 export function repairClass(text){
- const compact=cleanLabel(text);
- const extra=compact.match(/^1(0\d{2}\.\d{2})$/);
- const value=extra?.[1]||compact;
- return /^\d{3}\.\d{2}$/.test(value)?value:'';
+ const taken=takeClass(text);
+ return taken.rest?'':taken.classification;
+}
+function readLineFields(line){
+ const flat=String(line).replace(/[|丨]/g,'').replace(/[．。]/g,'.').replace(/(\d)\s+\./g,'$1.').replace(/\.\s+(\d)/g,'.$1').replace(/[ \t]+/g,' ').trim();
+ let classification='',pending='';
+ for(const token of flat.split(' ').filter(Boolean)){
+  const taken=takeClass(token);
+  if(taken.classification&&!classification){classification=taken.classification;pending+=taken.rest;}
+  else pending+=token;
+ }
+ return {classification,author:normalizeAuthor(pending)};
+}
+// A spine label is two lines: 005.13 / 이211ㅋ. Either line may arrive first.
+export function interpretCallNumber(...parts){
+ let classification='',author='';
+ for(const part of parts){
+  for(const line of String(part??'').split(/\r?\n/)){
+   const fields=readLineFields(line);
+   if(!classification&&fields.classification)classification=fields.classification;
+   if(fields.author)author=fields.author;
+  }
+ }
+ return {classification,author};
 }
 export function parseShelfText(raw){
  const flat=String(raw).replace(/[|丨]/g,'').replace(/[^0-9A-Za-z가-힣ㄱ-ㅎㅏ-ㅣ.=\s]/g,'').replace(/(\d)\s+\./g,'$1.').replace(/\.\s+(\d)/g,'.$1').replace(/\s+/g,' ').trim();
