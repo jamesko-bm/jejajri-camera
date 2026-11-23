@@ -7,27 +7,44 @@ const snapshot=document.createElement('canvas'),snapshotContext=snapshot.getCont
 const motion=document.createElement('canvas');motion.width=80;motion.height=45;const motionContext=motion.getContext('2d',{willReadFrequently:true});
 const gate=new RecognitionGate();let stream=null,worker=null,workerPromise=null,workerGeneration=0,loop=null,connecting=false,closed=false;
 const STEP_ORDER=['read','interpret','done'];
-function phase(name,hint,outcome=''){
+function phase(name,hint,outcome='',tone=''){
  const steps=$('steps'),status=$('status-text'),result=$('outcome'),index=STEP_ORDER.indexOf(name),showSteps=index>=0;
  steps.hidden=!showSteps;status.hidden=showSteps;if(!showSteps)status.textContent='카메라 대기';
  [...steps.children].forEach((el,i)=>{el.classList.toggle('settled',name==='done'||i<index);el.classList.toggle('active',name!=='done'&&i===index);if(name!=='done'&&i===index)el.setAttribute('aria-current','step');else el.removeAttribute('aria-current');});
- $('notice').className='notice '+(name==='done'?(outcome?'done':'warn'):name==='paused'?'paused':'checking');
+ $('notice').className='notice '+(tone||(name==='done'?(outcome?'done':'warn'):name==='paused'?'paused':'checking'));
  result.hidden=!outcome;if(outcome)result.textContent=outcome;
  $('notice').setAttribute('aria-label',outcome||(name==='interpret'?'해석 중':name==='done'?'완료':name==='read'?'읽음':'카메라 대기'));
  if(hint)$('hint').textContent=hint;
 }
 function clearBoxes(){context.clearRect(0,0,overlay.width,overlay.height);}
 function clearReadings(){const panel=$('readings');$('reading-list').replaceChildren();panel.hidden=true;}
-function showReadings(books,flagged){
- const bad=new Set(flagged),list=$('reading-list');
+function showReadings(books){
+ const list=$('reading-list');
  list.replaceChildren(...books.map((book,index)=>{
   const item=document.createElement('li');
   const number=[book.classification,book.author].filter(Boolean).join(' ');
   item.textContent=`${index+1}. ${number||'읽지 못함'}`;
-  if(bad.has(book))item.className='bad';
   return item;
  }));
  $('readings').hidden=!books.length;
+ return [...list.children];
+}
+const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+async function explainOrder(books,items,token){
+ phase('interpret','왼쪽 번호부터 다음 번호와 비교합니다.');
+ const result=decreasingBooks(books),flagged=new Set(result.flagged);
+ for(let i=0;i<books.length-1;i++){
+  if(token!==gate.revision||document.hidden||!items[i]?.isConnected||!items[i+1]?.isConnected)return null;
+  const pair=[items[i],items[i+1]];
+  pair.forEach(el=>el.classList.add('comparing'));
+  items[i].scrollIntoView({block:'nearest',inline:'nearest'});
+  phase('interpret',`${i+1}번과 ${i+2}번을 비교하는 중`);
+  await wait(900);
+  pair.forEach(el=>el.classList.remove('comparing'));
+  if(token!==gate.revision||document.hidden)return null;
+  if(flagged.has(books[i]))items[i].classList.add('bad');
+ }
+ return result;
 }
 function layout(){const stage=$('stage').getBoundingClientRect(),ratio=video.videoWidth/video.videoHeight;if(!Number.isFinite(ratio))return;let w=stage.width,h=w/ratio;if(h>stage.height){h=stage.height;w=h*ratio;}overlay.style.width=w+'px';overlay.style.height=h+'px';overlay.style.left=(stage.width-w)/2+'px';overlay.style.top=(stage.height-h)/2+'px';}
 window.addEventListener('resize',layout);
@@ -50,24 +67,33 @@ async function getWorker(){
 }
 async function resetWorker(){workerGeneration++;const previous=worker;worker=null;workerPromise=null;if(previous)await previous.terminate();}
 function signature(){motionContext.drawImage(video,0,0,80,45);const pixels=motionContext.getImageData(0,0,80,45).data;const values=new Uint8Array(80*45);for(let i=0;i<values.length;i++)values[i]=Math.round((pixels[i*4]+pixels[i*4+1]+pixels[i*4+2])/3);return values;}
-function drawBoxes(books,width,height){overlay.width=width;overlay.height=height;layout();context.strokeStyle='#ffe000';context.lineWidth=Math.max(4,width/240);context.shadowColor='#0008';context.shadowBlur=3;for(const book of books){const [x,y,r,b]=book.bbox;const inset=context.lineWidth/2;context.strokeRect(x+inset,y+inset,Math.max(1,r-x-inset*2),Math.max(1,b-y-inset*2));}}
 async function recognize(){
  const token=gate.begin();nativeFrame.width=video.videoWidth;nativeFrame.height=video.videoHeight;nativeContext.drawImage(video,0,0);const scale=Math.min(1,2000/Math.max(video.videoWidth,video.videoHeight));snapshot.width=Math.round(video.videoWidth*scale);snapshot.height=Math.round(video.videoHeight*scale);snapshotContext.drawImage(video,0,0,snapshot.width,snapshot.height);
  // Capture before asynchronous model work. Movement invalidates this revision.
  const image=snapshotContext.getImageData(0,0,snapshot.width,snapshot.height),encoded=snapshot.toDataURL('image/png');
  if(token!==gate.revision||document.hidden){gate.finish(token,false,performance.now());return;}
  gate.freeze();
- phase('interpret',worker?'화면을 움직여도 됩니다.':'화면을 움직여도 됩니다. 처음에는 인식 준비에 시간이 걸릴 수 있습니다.');
+ phase('read',worker?'청구기호를 읽고 있습니다. 화면을 움직여도 됩니다.':'청구기호를 읽고 있습니다. 처음에는 인식 준비에 시간이 걸릴 수 있습니다.');
  try{
   const engine=await getWorker();if(token!==gate.revision||document.hidden){gate.finish(token,false,performance.now());return;}
   const prepare=(book,part,variant)=>prepareLine(nativeFrame,book,part,image.width,undefined,variant);prepare.tiles=()=>detectionTiles(nativeFrame,image.width);prepare.shelf=()=>analyzeShelf(snapshot);
   const labels=await withTimeout(recognizeLabels(engine,encoded,image.width,image.height,()=>token===gate.revision&&!document.hidden,prepare));
-  const books=refineBookEdges(labels,image),result=decreasingBooks(books);
+  const books=refineBookEdges(labels,image);
+  if(token!==gate.revision||document.hidden){gate.finish(token,false,performance.now());return;}
+  const items=showReadings(books);
+  if(books.length<2){
+   if(!gate.finish(token,false,performance.now())||document.hidden)return;
+   clearBoxes();phase('read','흰색 청구기호 두 줄이 선명하게 보이도록 가까이 비춰 주세요.');return;
+  }
+  await wait(700);
+  if(token!==gate.revision||document.hidden){gate.finish(token,false,performance.now());return;}
+  const result=await explainOrder(books,items,token);
+  if(!result){gate.finish(token,false,performance.now());return;}
   if(!gate.finish(token,result.complete,performance.now())||document.hidden)return;
-  showReadings(books,result.flagged);
-  if(result.complete&&result.flagged.length){drawBoxes(result.flagged,image.width,image.height);phase('done','노란 글자와 테두리: 순서가 잘못된 책');}
-  else if(result.complete){clearBoxes();phase('done','다른 단을 보려면 화면을 움직여 주세요.','정상 배치');}
-  else{clearBoxes();phase('read','흰색 청구기호 두 줄이 선명하게 보이도록 가까이 비춰 주세요.');}
+  clearBoxes();
+  if(result.complete&&result.flagged.length)phase('done','빨간 번호는 뒤 번호보다 큽니다.','','alert');
+  else if(result.complete)phase('done','다른 단을 보려면 화면을 움직여 주세요.','정상 배치');
+  else phase('read','흰색 청구기호 두 줄이 선명하게 보이도록 가까이 비춰 주세요.');
  }catch(error){
   const fresh=gate.finish(token,false,performance.now());await resetWorker();
   if(fresh&&!document.hidden)phase('read',error.message||'선명한 책장 장면을 다시 확인합니다.');

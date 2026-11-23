@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="description" content="카메라로 책장을 비추면 청구기호를 자동으로 확인하고, 순서가 감소하기 직전의 책에 노란 테두리를 표시합니다.">
+<meta name="description" content="카메라로 책장을 비추면 청구기호를 읽고, 뒤 번호보다 큰 청구기호를 빨간색으로 표시합니다.">
 <meta name="theme-color" content="#10231d"><title>제자리 · 카메라</title>
 <link rel="stylesheet" href="style.css"><script type="module" src="app.js"></script>
 </head>
@@ -10,7 +10,7 @@
 <main class="camera-app" aria-label="제자리 실시간 책장 확인">
   <div class="camera-stage" id="stage">
     <video id="camera" autoplay muted playsinline aria-label="실시간 카메라 화면"></video>
-    <canvas id="overlay" aria-label="순서가 감소하기 직전의 책을 표시하는 노란 테두리"></canvas>
+    <canvas id="overlay" aria-hidden="true"></canvas>
   </div>
   <header><span class="brand">▥ 제자리</span><span class="live-label">카메라</span></header>
   <div id="notice" class="notice checking" role="status" aria-live="polite">
