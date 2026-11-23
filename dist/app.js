@@ -17,10 +17,22 @@ function phase(name,hint,outcome=''){
  if(hint)$('hint').textContent=hint;
 }
 function clearBoxes(){context.clearRect(0,0,overlay.width,overlay.height);}
+function clearReadings(){const list=$('readings');list.replaceChildren();list.hidden=true;}
+function showReadings(books,flagged){
+ const bad=new Set(flagged),list=$('readings');
+ list.replaceChildren(...books.map((book,index)=>{
+  const item=document.createElement('li');
+  const number=[book.classification,book.author].filter(Boolean).join(' ');
+  item.textContent=`${index+1}. ${number||'읽지 못함'}`;
+  if(bad.has(book))item.className='bad';
+  return item;
+ }));
+ list.hidden=!books.length;
+}
 function layout(){const stage=$('stage').getBoundingClientRect(),ratio=video.videoWidth/video.videoHeight;if(!Number.isFinite(ratio))return;let w=stage.width,h=w/ratio;if(h>stage.height){h=stage.height;w=h*ratio;}overlay.style.width=w+'px';overlay.style.height=h+'px';overlay.style.left=(stage.width-w)/2+'px';overlay.style.top=(stage.height-h)/2+'px';}
 window.addEventListener('resize',layout);
 function cameraError(error){
- $('error').hidden=false;clearBoxes();phase('paused','카메라가 연결되면 자동으로 확인합니다.');
+ $('error').hidden=false;clearBoxes();clearReadings();phase('paused','카메라가 연결되면 자동으로 확인합니다.');
  const messages={NotAllowedError:'주소창의 카메라 권한을 허용해 주세요. 앱 안의 브라우저에서 열리지 않으면 Safari 또는 Chrome에서 이 주소를 열어 주세요.',NotFoundError:'연결된 카메라를 찾지 못했습니다. 카메라가 있는 휴대폰이나 PC에서 열어 주세요.',NotReadableError:'다른 앱이 카메라를 사용 중일 수 있습니다. 해당 앱을 닫고 다시 연결해 주세요.',SecurityError:'HTTPS 주소의 일반 브라우저에서 열고 카메라 권한을 허용해 주세요.'};
  $('error-title').textContent='카메라 연결이 필요합니다';$('error-detail').textContent=messages[error.name]||error.message||'카메라를 연결하지 못했습니다.';
 }
@@ -52,7 +64,8 @@ async function recognize(){
   const labels=await withTimeout(recognizeLabels(engine,encoded,image.width,image.height,()=>token===gate.revision&&!document.hidden,prepare));
   const books=refineBookEdges(labels,image),result=decreasingBooks(books);
   if(!gate.finish(token,result.complete,performance.now())||document.hidden)return;
-  if(result.complete&&result.flagged.length){drawBoxes(result.flagged,image.width,image.height);phase('done','노란 테두리: 잘못 배치된 책');}
+  showReadings(books,result.flagged);
+  if(result.complete&&result.flagged.length){drawBoxes(result.flagged,image.width,image.height);phase('done','노란 글자와 테두리: 순서가 잘못된 책');}
   else if(result.complete){clearBoxes();phase('done','다른 단을 보려면 화면을 움직여 주세요.','정상 배치');}
   else{clearBoxes();phase('read','흰색 청구기호 두 줄이 선명하게 보이도록 가까이 비춰 주세요.');}
  }catch(error){
@@ -63,11 +76,11 @@ async function recognize(){
 function tick(){
  if(!stream||document.hidden||connecting||video.readyState<2||closed)return;
  const update=gate.tick(signature(),performance.now());
- if(update.moved){clearBoxes();phase('read','청구기호가 보이도록 한 단을 가만히 비춰 주세요.');}
+ if(update.moved){clearBoxes();clearReadings();phase('read','청구기호가 보이도록 한 단을 가만히 비춰 주세요.');}
  if(update.ready)void recognize();
 }
 async function startCamera(){
- if(connecting||closed)return;connecting=true;$('retry').disabled=true;$('error').hidden=true;phase('read','카메라 사용을 허용해 주세요.');gate.reset();clearBoxes();
+ if(connecting||closed)return;connecting=true;$('retry').disabled=true;$('error').hidden=true;phase('read','카메라 사용을 허용해 주세요.');gate.reset();clearBoxes();clearReadings();
  if(loop){clearInterval(loop);loop=null;}stream?.getTracks().forEach(t=>t.stop());stream=null;
  try{
   if(!window.isSecureContext||!navigator.mediaDevices?.getUserMedia)throw Object.assign(Error('HTTPS 주소의 Chrome 또는 Safari에서 열어 주세요.'),{name:'SecurityError'});
@@ -79,9 +92,9 @@ async function startCamera(){
 }
 $('retry').onclick=startCamera;
 video.addEventListener('loadedmetadata',layout);
-video.addEventListener('resize',()=>{gate.reset();clearBoxes();layout();});
+video.addEventListener('resize',()=>{gate.reset();clearBoxes();clearReadings();layout();});
 video.addEventListener('pause',()=>{if(stream&&!document.hidden&&!connecting)phase('read','카메라 화면을 다시 연결하고 있습니다.');});
 window.addEventListener('pagehide',()=>{closed=true;clearInterval(loop);stream?.getTracks().forEach(t=>t.stop());void resetWorker();});
 window.addEventListener('pageshow',e=>{if(e.persisted){closed=false;void startCamera();}});
- document.addEventListener('visibilitychange',()=>{gate.reset();clearBoxes();stream?.getTracks().forEach(t=>{t.enabled=!document.hidden;});if(document.hidden){video.pause();phase('read','화면으로 돌아오면 자동으로 확인합니다.');}else if(stream){video.play().catch(cameraError);phase('read','청구기호가 보이도록 한 단을 가만히 비춰 주세요.');}});
+ document.addEventListener('visibilitychange',()=>{gate.reset();clearBoxes();clearReadings();stream?.getTracks().forEach(t=>{t.enabled=!document.hidden;});if(document.hidden){video.pause();phase('read','화면으로 돌아오면 자동으로 확인합니다.');}else if(stream){video.play().catch(cameraError);phase('read','청구기호가 보이도록 한 단을 가만히 비춰 주세요.');}});
 void startCamera();
