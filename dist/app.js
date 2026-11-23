@@ -17,9 +17,9 @@ function phase(name,hint,outcome=''){
  if(hint)$('hint').textContent=hint;
 }
 function clearBoxes(){context.clearRect(0,0,overlay.width,overlay.height);}
-function clearReadings(){const list=$('readings');list.replaceChildren();list.hidden=true;}
+function clearReadings(){const panel=$('readings');$('reading-list').replaceChildren();panel.hidden=true;}
 function showReadings(books,flagged){
- const bad=new Set(flagged),list=$('readings');
+ const bad=new Set(flagged),list=$('reading-list');
  list.replaceChildren(...books.map((book,index)=>{
   const item=document.createElement('li');
   const number=[book.classification,book.author].filter(Boolean).join(' ');
@@ -27,7 +27,7 @@ function showReadings(books,flagged){
   if(bad.has(book))item.className='bad';
   return item;
  }));
- list.hidden=!books.length;
+ $('readings').hidden=!books.length;
 }
 function layout(){const stage=$('stage').getBoundingClientRect(),ratio=video.videoWidth/video.videoHeight;if(!Number.isFinite(ratio))return;let w=stage.width,h=w/ratio;if(h>stage.height){h=stage.height;w=h*ratio;}overlay.style.width=w+'px';overlay.style.height=h+'px';overlay.style.left=(stage.width-w)/2+'px';overlay.style.top=(stage.height-h)/2+'px';}
 window.addEventListener('resize',layout);
@@ -76,7 +76,7 @@ async function recognize(){
 function tick(){
  if(!stream||document.hidden||connecting||video.readyState<2||closed)return;
  const update=gate.tick(signature(),performance.now());
- if(update.moved){clearBoxes();clearReadings();phase('read','청구기호가 보이도록 한 단을 가만히 비춰 주세요.');}
+ if(update.moved){clearBoxes();phase('read','청구기호가 보이도록 한 단을 가만히 비춰 주세요.');}
  if(update.ready)void recognize();
 }
 async function startCamera(){
