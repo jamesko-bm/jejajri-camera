@@ -22,17 +22,8 @@ function showReadings(books,flagged){
  const bad=new Set(flagged),list=$('reading-list');
  list.replaceChildren(...books.map((book,index)=>{
   const item=document.createElement('li');
-  const indexMark=document.createElement('span');
-  indexMark.className='reading-index';
-  indexMark.textContent=String(index+1);
-  const number=document.createElement('span');
-  number.className='reading-number';
-  const classification=document.createElement('span');
-  classification.textContent=book.classification||'—';
-  const author=document.createElement('span');
-  author.textContent=book.author||'읽지 못함';
-  number.append(classification,author);
-  item.append(indexMark,number);
+  const number=[book.classification,book.author].filter(Boolean).join(' ');
+  item.textContent=`${index+1}. ${number||'읽지 못함'}`;
   if(bad.has(book))item.className='bad';
   return item;
  }));
