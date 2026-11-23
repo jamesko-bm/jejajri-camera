@@ -31,14 +31,18 @@ export function frameDifference(a,b){
 
 export class RecognitionGate{
  constructor({settleMs=1000,threshold=7,retryMs=3000}={}){Object.assign(this,{settleMs,threshold,retryMs});this.reset();}
- reset(){this.revision=(this.revision||0)+1;this.reference=null;this.previous=null;this.lastMotion=0;this.nextTry=0;this.done=false;this.busy=this.busy||false;}
+ reset(){this.revision=(this.revision||0)+1;this.reference=null;this.previous=null;this.lastMotion=0;this.nextTry=0;this.done=false;this.busy=this.busy||false;this.held=null;this.followUntil=0;}
  tick(signature,now){
   const moved=!this.reference||frameDifference(signature,this.previous)>this.threshold||frameDifference(signature,this.reference)>this.threshold;
-  if(moved){this.revision++;this.reference=signature.slice();this.lastMotion=now;this.done=false;this.nextTry=0;}
-  this.previous=signature.slice();return {moved,ready:!this.busy&&!this.done&&now-this.lastMotion>=this.settleMs&&now>=this.nextTry};
+  const holding=this.held!=null&&this.held===this.activeToken;
+  const following=this.followUntil>now;
+  if(moved&&!holding&&!following){this.revision++;this.reference=signature.slice();this.lastMotion=now;this.done=false;this.nextTry=0;this.followUntil=0;}
+  else if(moved)this.reference=signature.slice();
+  this.previous=signature.slice();return {moved:moved&&!holding&&!following,ready:!this.busy&&!this.done&&now-this.lastMotion>=this.settleMs&&now>=this.nextTry};
  }
- begin(){this.busy=true;this.activeToken=this.revision;return this.revision;}
- finish(token,complete,now){if(token!==this.activeToken)return false;this.busy=false;this.activeToken=null;if(token!==this.revision)return false;this.done=complete;this.nextTry=now+this.retryMs;return true;}
+ begin(){this.busy=true;this.held=null;this.followUntil=0;this.activeToken=this.revision;return this.revision;}
+ freeze(){if(this.busy)this.held=this.activeToken;}
+ finish(token,complete,now){this.held=null;if(token!==this.activeToken)return false;this.busy=false;this.activeToken=null;if(token!==this.revision)return false;this.done=complete;this.nextTry=now+this.retryMs;this.followUntil=complete?now+1000:0;return true;}
 }
 
 export function cameraCandidates(words,width,height){

@@ -1,7 +1,92 @@
-import {readLabels,cleanLabel,isAuthor} from './labels.mjs';
+import {readLabels,cleanLabel,isAuthor,normalizeAuthor,parseShelfText,repairClass} from './labels.mjs';
+
+function preferClass(a,b){
+ if(!a)return b||'';
+ if(!b||a===b)return a;
+ if(b.startsWith(`${a}.`))return b;
+ if(a.startsWith(`${b}.`))return a;
+ return '';
+}
+
+function mergeShelf(scene,strips){
+ const items=strips.filter(s=>s.classification||s.author).map(s=>({classification:s.classification||'',author:s.author||'',volume:'',confidence:s.confidence||0,bbox:s.bbox,uncertain:!!s.uncertain||!s.classification||!s.author}));
+ for(const book of scene){
+  const cx=(book.bbox[0]+book.bbox[2])/2;
+  const hit=items.find(s=>cx>=s.bbox[0]&&cx<=s.bbox[2]);
+  if(!hit){items.push({classification:book.classification,author:book.author||'',volume:book.volume||'',confidence:book.confidence||0,bbox:book.bbox,uncertain:!book.author});continue;}
+  const cls=preferClass(hit.classification,book.classification);
+  if(!cls&&hit.classification&&book.classification&&hit.classification!==book.classification)hit.uncertain=true;
+  else if(cls)hit.classification=cls;
+  if(!hit.author)hit.author=book.author||'';
+  else if(book.author&&book.author.length>hit.author.length&&isAuthor(book.author))hit.author=book.author;
+  if(book.volume)hit.volume=book.volume;
+  hit.confidence=Math.max(hit.confidence,book.confidence||0);
+  hit.uncertain=hit.uncertain||!hit.classification||!hit.author;
+ }
+ items.sort((a,b)=>a.bbox[0]-b.bbox[0]);
+ const kept=items.flatMap(s=>{const ok=/^\d{3}(?:\.\d+)?$/.test(s.classification);if(!ok&&!s.author)return [];return [{...s,classification:ok?s.classification:'',uncertain:s.uncertain||!ok}];});
+ if(kept.length<2)return [];
+ return kept.map((s,i)=>({id:`V${String(i+1).padStart(2,'0')}`,classification:s.classification,author:s.author||'',volume:s.volume||'',bbox:s.bbox.map(Math.round),labelBox:s.bbox.map(Math.round),confidence:s.confidence||0,confirmed:false,uncertain:!!s.uncertain}));
+}
+
+async function recognizeShelf(engine,prepare,width,height,isCurrent){
+ const layout=prepare.shelf();
+ if(!layout?.strips?.length)return [];
+ let books=[],words=[];
+ if(layout.band){
+  await engine.setParameters({tessedit_pageseg_mode:'11',tessedit_char_whitelist:''});
+  if(!isCurrent())return [];
+  const {data:band}=await engine.recognize(layout.band.image,{}, {text:true,blocks:true});
+  words=(band.words||[]).map(layout.band.mapWord);
+  books=readLabels(words,width,height);
+ }
+ await engine.setParameters({tessedit_pageseg_mode:'11',tessedit_char_whitelist:''});
+ const strips=[];
+ for(const strip of layout.strips){
+  if(!isCurrent())return [];
+  if(!String(strip.image).startsWith('data:image'))continue;
+  const lines=Array.isArray(strip.lines)?strip.lines:[];
+  let lineClass='',lineAuthor='';
+  if(lines[0]){
+   await engine.setParameters({tessedit_pageseg_mode:'7',tessedit_char_whitelist:'0123456789.'});
+   const {data:numberLine}=await engine.recognize(lines[0]);
+   lineClass=repairClass(numberLine.text||'');
+  }
+  if(lines[1]){
+   await engine.setParameters({tessedit_pageseg_mode:'7',tessedit_char_whitelist:'0123456789이김나진허ㄱㄴㄷㄹㅁㅂㅅㅇㅈㅊㅋㅌㅍㅎ'});
+   const {data:authorLine}=await engine.recognize(lines[1]);
+   lineAuthor=normalizeAuthor(authorLine.text||'');
+  }
+  await engine.setParameters({tessedit_pageseg_mode:'11',tessedit_char_whitelist:''});
+  const {data}=(!lineClass||!lineAuthor)?await engine.recognize(strip.image):{data:{text:'',confidence:0}};
+  const local=words.filter(w=>w.bbox&&(w.bbox.x0+w.bbox.x1)/2>=strip.bbox[0]&&(w.bbox.x0+w.bbox.x1)/2<=strip.bbox[2]).sort((a,b)=>a.bbox.y0-b.bbox.y0||a.bbox.x0-b.bbox.x0).map(w=>w.text).join(' ');
+  const fromFull=parseShelfText(data.text||''),fromBand=parseShelfText(local);
+  const backup=preferClass(fromFull.classification,fromBand.classification)||fromFull.classification||fromBand.classification;
+  const classification=lineClass||(/^\d{3}\.\d{2}$/.test(backup)?backup:'');
+  const author=lineAuthor||fromFull.author||fromBand.author;
+  strips.push({classification,author,uncertain:!/^\d{3}\.\d{2}$/.test(classification)||!author,bbox:strip.bbox,confidence:data.confidence||0});
+ }
+ return mergeShelf(books,strips);
+}
 
 // First find labels in the scene, then read each two-line label separately.
 export async function recognizeLabels(engine,encoded,width,height,isCurrent=()=>true,prepare=null){
+ if(prepare?.shelf){
+  const shelf=await recognizeShelf(engine,prepare,width,height,isCurrent);
+  if(!isCurrent())return [];
+  if(shelf.length){
+  await engine.setParameters({tessedit_pageseg_mode:'11',tessedit_char_whitelist:''});
+  const {data:sceneData}=await engine.recognize(encoded,{}, {text:true,blocks:true});
+  for(const book of readLabels(sceneData.words||[],width,height)){
+   const box=book.labelBox||book.bbox,cx=(box[0]+box[2])/2;
+   const hit=shelf.find(s=>cx>=s.bbox[0]&&cx<=s.bbox[2]);
+   if(!hit||hit.classification||!/^\d{3}\.\d{2}$/.test(book.classification))continue;
+   hit.classification=book.classification;
+   hit.uncertain=!hit.author;
+  }
+  if(shelf.some(b=>/^\d{3}\.\d{2}$/.test(b.classification)))return shelf;
+ }
+ }
  await engine.setParameters({tessedit_pageseg_mode:'11',tessedit_char_whitelist:''});
  const {data}=await engine.recognize(encoded,{}, {text:true,blocks:true});
  let books=readLabels(data.words||[],width,height);
@@ -41,8 +126,8 @@ export async function recognizeLabels(engine,encoded,width,height,isCurrent=()=>
     for(let variant=0;variant<2;variant++){
      if(!isCurrent())return [];
      const {data:line}=await engine.recognize(prepare(book,'author',variant),{}, {text:true,blocks:true});
-     const author=cleanLabel(line.text||'').replace(/^[|丨]+|[|丨]+$/g,'');
-     if(isAuthor(author)&&line.confidence>=75){book.author=author;break;}
+     const author=normalizeAuthor(line.text||'');
+     if(author&&line.confidence>=75){book.author=author;break;}
     }
    }
    if(book.uncertain){

@@ -1,6 +1,37 @@
 // Keep compatibility jamo (ㄱ, ㅋ, …); NFKC would change their ordering.
 export const cleanLabel = text => String(text).normalize('NFC').replace(/\s+/g,'').replace(/[．。]/g,'.');
-export const isAuthor = text => /^[가-힣A-Za-z]+\d+[가-힣ㄱ-ㅎㅏ-ㅣA-Za-z0-9.-]*$/.test(text);
+export const isAuthor = text => /^[가-힣]+\d+[ㄱ-ㅎㅏ-ㅣ0-9]*$/.test(text);
+// A leading 0 on an author line is the usual misread of 이, as in 0164ㄷ.
+function finishAuthor(compact){
+ let body=compact.replace(/^1(?=[가-힣])/,'').replace(/([ㄱ-ㅎ])\1+$/,'$1').replace(/^[oO][lI]/,'01').replace(/^[oO](?=\d)/,'0');
+ if(/^[0Oo]\d+[ㄱ-ㅎㅏ-ㅣ가-힣]/.test(body)&&!body.includes('.')){
+  body=body.slice(1);
+  // 이 is often split into a 0 and a stray 1.
+  if(/^1\d{2,}[ㄱ-ㅎㅏ-ㅣ가-힣]/.test(body))body=body.slice(1);
+  body='이'+body;
+ }
+ return isAuthor(body)?body:'';
+}
+export function normalizeAuthor(text){
+ const compact=cleanLabel(text).replace(/[|丨]/g,'');
+ const closed=/^[0Oo]\d{3,}3$/.test(compact)?`${compact.slice(0,-1)}ㅋ`:compact;
+ return finishAuthor(compact)||finishAuthor(compact.replace(/=+$/,'ㅋ'))||finishAuthor(closed);
+}
+export function repairClass(text){
+ const compact=cleanLabel(text);
+ const extra=compact.match(/^1(0\d{2}\.\d{2})$/);
+ const value=extra?.[1]||compact;
+ return /^\d{3}\.\d{2}$/.test(value)?value:'';
+}
+export function parseShelfText(raw){
+ const flat=String(raw).replace(/[|丨]/g,'').replace(/[^0-9A-Za-z가-힣ㄱ-ㅎㅏ-ㅣ.=\s]/g,'').replace(/(\d)\s+\./g,'$1.').replace(/\.\s+(\d)/g,'.$1').replace(/\s+/g,' ').trim();
+ const decimal=flat.match(/(?:^|\D)(\d{3}\.\d{1,3})(?!\d)/);
+ const dropped=flat.match(/(?:^|\D)(0[1-9]\.\d{2})(?!\d)/);
+ const integer=flat.match(/(?:^|\s)(\d{3})(?=\s|$)/);
+ const classification=decimal?.[1]||(dropped?`0${dropped[1]}`:'')||integer?.[1]||'';
+ const rest=classification?flat.replace(classification.startsWith('0')&&dropped&&!decimal?dropped[1]:classification,''):flat;
+ return {classification,author:normalizeAuthor(rest)};
+}
 const center = w => (w.bbox.x0+w.bbox.x1)/2;
 const lineHeight = w => w.bbox.y1-w.bbox.y0;
 
@@ -17,7 +48,7 @@ export function readLabels(words,width,height,minLabels=2){
    if(!next)break;chain.push(next);last=next;
   }
  }
- const authors=spans.filter(w=>isAuthor(w.text));
+ const authors=spans.map(w=>({...w,text:normalizeAuthor(w.text)})).filter(w=>w.text);
  let anchors=spans.filter(w=>/^\d{3}(?:\.\d+)?$/.test(w.text));
  // Prefer a full decimal to an overlapping integer fragment.
  anchors=anchors.filter(a=>!anchors.some(b=>b!==a&&b.text.length>a.text.length&&b.bbox.x0<=a.bbox.x0&&b.bbox.x1>=a.bbox.x1&&Math.abs(b.bbox.y0-a.bbox.y0)<3));

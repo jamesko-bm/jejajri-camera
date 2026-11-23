@@ -1,7 +1,7 @@
 import {test} from 'node:test';import assert from 'node:assert/strict';
 import {decreasingBooks,RecognitionGate,frameDifference,cameraCandidates,refineBookEdges} from './dist/camera-core.mjs';
 import {readFileSync} from 'node:fs';
-import {readLabels} from './dist/labels.mjs';
+import {readLabels,normalizeAuthor,parseShelfText,repairClass} from './dist/labels.mjs';
 import {recognizeLabels} from './dist/recognition.mjs';
 import {improveCameraFocus} from './dist/image-preparation.mjs';
 const book=(classification,id=classification,author='김10',volume='1')=>({id,classification,author,volume,bbox:[0,0,100,100]});
@@ -28,6 +28,24 @@ test('line recovery restores a missing author without changing known classificat
  let calls=0;const parameters=[];const engine={setParameters:async p=>parameters.push(p),recognize:async()=>({data:++calls===1?{words:pair}:calls===3?{text:'이211ㅋ',confidence:89}:{words:[]}})};
  const result=await recognizeLabels(engine,'full',300,250,()=>true,()=> 'native-crop');
  assert.equal(result[0].author,'이211ㅋ');assert.equal(result[0].classification,'005.13');assert.equal(parameters[0].tessedit_char_whitelist,'');
+});
+test('blurred author digits that start with 0 are read as 이',()=>{
+ assert.equal(normalizeAuthor('0164ㄷ'),'이64ㄷ');
+ assert.equal(normalizeAuthor('01211ㅋ'),'이211ㅋ');
+ assert.equal(normalizeAuthor('01211='),'이211ㅋ');
+ assert.equal(normalizeAuthor('ol211='),'이211ㅋ');
+ assert.equal(normalizeAuthor('012113'),'이211ㅋ');
+ assert.equal(normalizeAuthor('1이64ㄷㄷ'),'이64ㄷ');
+ assert.equal(repairClass('1004.59'),'004.59');
+ assert.equal(repairClass('4945.19'),'');
+ assert.equal(parseShelfText('UUs. 10 ol211=').classification,'');
+ assert.equal(normalizeAuthor('004.59'),'');
+ assert.deepEqual(parseShelfText('04.59 0164ㄷ'),{classification:'004.59',author:'이64ㄷ'});
+ assert.deepEqual(parseShelfText('004 .59 김94ㄱ2'),{classification:'004.59',author:'김94ㄱ2'});
+ assert.deepEqual(parseShelfText('004.59 0164ㄷ'),{classification:'004.59',author:'이64ㄷ'});
+ assert.deepEqual(parseShelfText('004.59 김94ㄱ2'),{classification:'004.59',author:'김94ㄱ2'});
+ assert.equal(parseShelfText('0064.59 Bais').classification,'');
+ assert.equal(readLabels([word('004.59',20,100),word('0164ㄷ',20,125),word('004.73',180,100),word('진91ㅋ',180,125)],400,300)[0].author,'이64ㄷ');
 });
 test('real label format: jamo, split tokens, decimals and badges',()=>{
  const words=[word('004',20,100,26),word('.',47,101,3),word('59',52,100,20),word('이',20,127,14),word('64',36,124,20,25),word('ㄷ',58,129,12,12),word('005.13',150,108),word('이211ㅋ',150,134),word('004.73',280,116),word('진91ㅋ',280,142),word('신간',150,60),word('신간',280,60),...Array.from({length:5},(_,i)=>word('000',20+i*70,210,55,35))];
@@ -57,6 +75,7 @@ test('decreases mark the preceding left book',()=>{const books=['100','180','410
 test('equal call numbers are allowed; each drop in a reverse run is marked',()=>{assert.equal(decreasingBooks([book('100'),book('100')]).flagged.length,0);assert.deepEqual(decreasingBooks(['300','200','100'].map(n=>book(n))).flagged.map(b=>b.id),['300','200']);});
 test('natural author and volume comparisons; absent fields do not invent order',()=>{assert.equal(decreasingBooks([book('100','a','김10'),book('100','b','김2')]).flagged[0].id,'a');assert.equal(decreasingBooks([book('100','a','김10','2'),book('100','b','김10','1')]).flagged[0].id,'a');assert.equal(decreasingBooks([book('100','a',''),book('100','b')]).complete,false);assert.equal(decreasingBooks([book('100')]).complete,false);assert.equal(decreasingBooks([book('100','a','김1',''),book('100','b','김1','')]).complete,true);assert.equal(decreasingBooks([book('100','a','김1',''),book('100','b','김1','2')]).complete,false);});
 test('automatic settle, recognition, completion, movement and stale results',()=>{const gate=new RecognitionGate();const still=new Uint8Array([20,50,100,160]),moved=new Uint8Array([160,100,50,20]);assert.equal(gate.tick(still,0).ready,false);assert.equal(gate.tick(still,1001).ready,true);const token=gate.begin();assert.equal(gate.tick(still,1200).ready,false);assert.equal(gate.finish(token,true,1400),true);assert.equal(gate.tick(still,2500).ready,false);assert.equal(gate.tick(moved,2700).moved,true);assert.equal(gate.done,false);assert.equal(gate.tick(moved,3800).ready,true);const next=gate.begin();gate.tick(still,3900);assert.equal(gate.finish(next,true,4000),false);assert.equal(gate.done,false);});
+test('a captured frame can be interpreted while the camera moves',()=>{const gate=new RecognitionGate();const still=new Uint8Array([20,50,100,160]),moved=new Uint8Array([160,100,50,20]);gate.tick(still,0);gate.tick(still,1100);const token=gate.begin();gate.freeze();assert.equal(gate.tick(moved,1300).moved,false);assert.equal(gate.finish(token,true,1500),true);assert.equal(gate.done,true);assert.equal(gate.tick(moved,2000).moved,false);assert.equal(gate.done,true);assert.equal(gate.tick(still,2700).moved,true);assert.equal(gate.done,false);});
 test('incomplete OCR retries automatically; slow cumulative motion invalidates',()=>{const gate=new RecognitionGate({threshold:5});const a=Uint8Array.from([20,50,100,160]);gate.tick(a,0);gate.tick(a,1100);gate.finish(gate.begin(),false,1200);assert.equal(gate.tick(a,3000).ready,false);assert.equal(gate.tick(a,4300).ready,true);gate.finish(gate.begin(),true,4400);for(let i=1;i<=8;i++)gate.tick(Uint8Array.from([20+i,50+i,100-i,160-i]),4500+i*180);assert.equal(gate.done,false);});
 test('uniform exposure change and slight noise do not count as motion',()=>{assert.equal(frameDifference([20,50,80],[30,60,90]),0);assert.ok(frameDifference([20,50,80],[21,49,80])<1);});
 test('visibility reset waits for in-flight OCR and never accepts its stale result',()=>{const gate=new RecognitionGate();const sig=[10,30,80];gate.tick(sig,0);gate.tick(sig,1100);const token=gate.begin();gate.reset();gate.tick(sig,2000);assert.equal(gate.tick(sig,3100).ready,false);assert.equal(gate.finish(token,true,3200),false);assert.equal(gate.tick(sig,3300).ready,true);});
