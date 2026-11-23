@@ -37,7 +37,6 @@ async function explainOrder(books,items,token){
   if(token!==gate.revision||document.hidden||!items[i]?.isConnected||!items[i+1]?.isConnected)return null;
   const pair=[items[i],items[i+1]];
   pair.forEach(el=>el.classList.add('comparing'));
-  items[i].scrollIntoView({block:'nearest',inline:'nearest'});
   phase('interpret',`${i+1}번과 ${i+2}번을 비교하는 중`);
   await wait(900);
   pair.forEach(el=>el.classList.remove('comparing'));
