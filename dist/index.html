@@ -2,31 +2,23 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="description" content="카메라로 책장을 비추면 청구기호를 읽고, 뒤 번호보다 큰 청구기호를 빨간색으로 표시합니다.">
+<meta name="description" content="책장 사진을 한 장 찍으면 청구기호를 읽고, 잘못 꽂힌 번호에 노란색 상자를 그립니다.">
 <meta name="theme-color" content="#10231d"><title>제자리 · 카메라</title>
 <link rel="stylesheet" href="style.css"><script type="module" src="app.js"></script>
 </head>
 <body>
-<main class="camera-app" aria-label="제자리 실시간 책장 확인">
+<main class="camera-app" aria-label="제자리 책장 사진 확인">
   <div class="camera-stage" id="stage">
-    <video id="camera" autoplay muted playsinline aria-label="실시간 카메라 화면"></video>
-    <canvas id="overlay" aria-hidden="true"></canvas>
+    <video id="camera" autoplay muted playsinline aria-label="사진 찍는 화면"></video>
+    <canvas id="overlay" hidden aria-hidden="true"></canvas>
   </div>
   <header><span class="brand">▥ 제자리</span><span class="live-label">카메라</span></header>
-  <div id="notice" class="notice checking" role="status" aria-live="polite">
-    <ol class="steps" id="steps">
-      <li class="step active" data-step="read"><span>읽음</span></li>
-      <li class="step" data-step="interpret"><span>해석 중</span></li>
-      <li class="step" data-step="done"><span>완료</span></li>
-    </ol>
-    <p id="outcome" class="outcome" hidden>정상 배치</p>
-    <p id="status-text" class="status-text" hidden></p>
-  </div>
-  <aside id="readings" class="readings" hidden>
-    <p class="readings-title">읽은 번호</p>
-    <ol id="reading-list"></ol>
-  </aside>
+  <p id="processing" class="processing" hidden role="status" aria-live="polite">[처리 중]</p>
   <div id="error" class="error" role="alert" hidden><h1 id="error-title">카메라 연결이 필요합니다</h1><p id="error-detail"></p><button id="retry" type="button">카메라 다시 연결</button></div>
-  <footer><p id="hint">카메라 사용을 허용해 주세요.</p><span>한 단씩 비춰 주세요 · 영상은 저장·전송하지 않습니다</span></footer>
+  <footer>
+    <p id="hint">카메라 사용을 허용해 주세요.</p>
+    <button id="read-shelf" type="button" disabled>책장 읽기</button>
+    <span>한 장씩 확인합니다 · 영상은 저장·전송하지 않습니다</span>
+  </footer>
 </main>
 </body></html>
