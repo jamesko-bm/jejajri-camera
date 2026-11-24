@@ -18,9 +18,14 @@ export function normalizeAuthor(text){
  const closed=/^[0Oo]\d{3,}3$/.test(compact)?`${compact.slice(0,-1)}ㅋ`:compact;
  return finishAuthor(compact)||finishAuthor(compact.replace(/=+$/,'ㅋ'))||finishAuthor(closed);
 }
+// A round cutter mark is often read as © or a trailing 6. Keep it as ㅇ when the glyph is a circle.
+export function circleAuthor(text){
+ const found=String(text).replace(/[©○●∘◦®]/g,'ㅇ').replace(/\s+/g,'').match(/[가-힣]{1,3}\d{1,4}ㅇ/);
+ return found&&isAuthor(found[0])?found[0]:'';
+}
 // The upper line is NNN.NN. A leading 1 is a spine edge; 05.13 is a dropped 0.
 function takeClass(token){
- const compact=cleanLabel(token).replace(/[|丨]/g,'').replace(/\.+$/,'');
+ const compact=cleanLabel(token).replace(/[|丨]/g,'').replace(/\.+$/,'').replace(/^[^0-9]+/,'');
  if(!compact)return {classification:'',rest:''};
  const lead=compact.match(/^1(0\d{2}\.\d{2})(?!\d)(.*)$/);
  if(lead)return {classification:lead[1],rest:lead[2]};

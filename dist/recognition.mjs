@@ -1,7 +1,9 @@
-import {readLabels,cleanLabel,isAuthor,normalizeAuthor,parseShelfText,interpretCallNumber} from './labels.mjs';
+import {readLabels,cleanLabel,isAuthor,normalizeAuthor,parseShelfText,interpretCallNumber,circleAuthor} from './labels.mjs';
 
 const DIGIT_WHITELIST='0123456789.';
-const AUTHOR_WHITELIST=`0123456789.${Array.from({length:0x3163-0x3131+1},(_,i)=>String.fromCharCode(0x3131+i)).join('')}${Array.from({length:0xD7A3-0xAC00+1},(_,i)=>String.fromCharCode(0xAC00+i)).join('')}`;
+const JAMO=Array.from({length:0x3163-0x3131+1},(_,i)=>String.fromCharCode(0x3131+i)).join('');
+const SURNAMES='가간갈감강개경고곡공곽구국권금기길김나남노도라류리마맹모문미민박방배백버변봉부사삼상서석선설성소손송수시신심아안양엄여연염영오옥완왕요용우원유육윤은음이인임자장전정제조조주준지진차채천최추탁태하한허현호홍황';
+const AUTHOR_WHITELIST=`0123456789${JAMO}${SURNAMES}`;
 
 function preferFields(primary,extra){
  return {classification:primary.classification||extra.classification||'',author:primary.author||extra.author||''};
@@ -25,7 +27,6 @@ function mergeShelf(scene,strips){
   if(!cls&&hit.classification&&book.classification&&hit.classification!==book.classification)hit.uncertain=true;
   else if(cls)hit.classification=cls;
   if(!hit.author)hit.author=book.author||'';
-  else if(book.author&&book.author.length>hit.author.length&&isAuthor(book.author))hit.author=book.author;
   if(book.volume)hit.volume=book.volume;
   hit.confidence=Math.max(hit.confidence,book.confidence||0);
   hit.uncertain=hit.uncertain||!hit.classification||!hit.author;
@@ -53,22 +54,33 @@ async function recognizeShelf(engine,prepare,width,height,isCurrent){
   if(!isCurrent())return [];
   if(!String(strip.image).startsWith('data:image'))continue;
   const lines=Array.isArray(strip.lines)?strip.lines:[];
+  const gray=Array.isArray(strip.grayLines)?strip.grayLines:[];
   const readLine=async (image,whitelist)=>{
    await engine.setParameters({tessedit_pageseg_mode:'7',tessedit_char_whitelist:whitelist});
    const {data:line}=await engine.recognize(image);
    return interpretCallNumber(line?.text||'');
   };
   let parsed={classification:'',author:''},topWasClass=false,topAuthor='',confidence=0;
-  if(lines[0]){
-   if(!isCurrent())return [];
-   const top=await readLine(lines[0],DIGIT_WHITELIST);
-   topWasClass=!!top.classification;topAuthor=top.author;
-   parsed=preferFields(parsed,{classification:top.classification,author:''});
+  const take=async (image,whitelist,kind)=>{
+   if(!image)return;
+   if(!isCurrent())return;
+   const fields=await readLine(image,whitelist);
+   if(kind==='class'){if(fields.classification)parsed=preferFields(parsed,{classification:fields.classification,author:''});}
+   else parsed=preferFields(parsed,fields);
+  };
+  if(lines[0]){await take(lines[0],DIGIT_WHITELIST,'class');topWasClass=!!parsed.classification;}
+  if(lines[0]&&/^[17]\d{2}\.\d{2}$/.test(parsed.classification)){
+   const open=await readLine(lines[0],'');
+   if(/^00\d\.\d{2}$/.test(open.classification))parsed={classification:open.classification,author:parsed.author};
   }
+  if(!isCurrent())return [];
   if(lines[1]){
-   if(!isCurrent())return [];
-   parsed=preferFields(parsed,await readLine(lines[1],AUTHOR_WHITELIST));
+   const authorLine=await readLine(lines[1],AUTHOR_WHITELIST);
+   topAuthor=authorLine.author;
+   parsed=preferFields(parsed,authorLine);
   }
+  if(!parsed.author)await take(gray[1],AUTHOR_WHITELIST,'author');
+  if(!parsed.author)await take(gray[1],'','author');
   // Digit-only recovery of 이 belongs to the author line, after the real cutter is tried.
   if(!parsed.author&&topAuthor&&!topWasClass)parsed=preferFields(parsed,{classification:'',author:topAuthor});
   // The author line is the lower one, but a swapped crop still has to land on the cutter.
@@ -80,12 +92,14 @@ async function recognizeShelf(engine,prepare,width,height,isCurrent){
    if(!isCurrent())return [];
    parsed=preferFields(parsed,await readLine(lines[1],DIGIT_WHITELIST));
   }
-  if(!parsed.classification||!parsed.author){
+  if(!parsed.classification||!parsed.author||/6$/.test(parsed.author)){
    if(!isCurrent())return [];
    await engine.setParameters({tessedit_pageseg_mode:'6',tessedit_char_whitelist:''});
    const {data}=await engine.recognize(strip.image);
    confidence=data.confidence||0;
    parsed=preferFields(parsed,interpretCallNumber(data.text||''));
+   const circled=circleAuthor(data.text||'');
+   if(circled&&(!parsed.author||parsed.author===circled.replace(/ㅇ$/,'6')||parsed.author===circled.slice(0,-1)))parsed.author=circled;
    const local=words.filter(w=>w.bbox&&(w.bbox.x0+w.bbox.x1)/2>=strip.bbox[0]&&(w.bbox.x0+w.bbox.x1)/2<=strip.bbox[2]).sort((a,b)=>a.bbox.y0-b.bbox.y0||a.bbox.x0-b.bbox.x0).map(w=>w.text).join(' ');
    const fromBand=parseShelfText(local);
    if(!parsed.classification&&/^\d{3}\.\d{2}$/.test(fromBand.classification))parsed.classification=fromBand.classification;

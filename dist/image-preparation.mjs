@@ -95,6 +95,7 @@ function adaptiveTrim(source,x0,y0,x1,y1,makeCanvas){
  ctx.drawImage(source,x0,y0,sw,sh,0,0,canvas.width,canvas.height);
  const image=ctx.getImageData(0,0,canvas.width,canvas.height),{data,width,height}=image,gray=new Uint8Array(width*height);
  for(let i=0;i<gray.length;i++)gray[i]=Math.round(data[i*4]*.299+data[i*4+1]*.587+data[i*4+2]*.114);
+ const photo=gray.slice();
  for(let x=0;x<width;x++){
   let dark=0;for(let y=0;y<height;y++)if(gray[y*width+x]<70)dark++;
   if(dark/height>.72)for(let y=0;y<height;y++)gray[y*width+x]=255;
@@ -144,13 +145,36 @@ function adaptiveTrim(source,x0,y0,x1,y1,makeCanvas){
    if(bestRun>=2&&bestAt-a>8&&b-bestAt>8)cuts.splice(0,1,[a,bestAt-1],[bestAt+1,b]);
   }
  }
- const lines=cuts.slice(0,2).map(([a,b])=>{
+ const lineAt=(a,b,sample)=>{
+  const linePad=20,h=b-a+1,line=blank(makeCanvas,out.width,h+linePad*2),lctx=line.getContext('2d',{willReadFrequently:true});
+  lctx.fillStyle='white';lctx.fillRect(0,0,line.width,line.height);
+  const pixels=lctx.getImageData(0,0,line.width,line.height),samples=[];
+  for(let y=0;y<h;y++)for(let x=0;x<out.width;x++){
+   const sx=x-pad+minX,sy=y+a-pad+minY;
+   const value=sx>=0&&sy>=0&&sx<width&&sy<height?sample(sx,sy):255;
+   samples.push(value);
+   const d=((y+linePad)*line.width+x)*4;
+   pixels.data[d]=pixels.data[d+1]=pixels.data[d+2]=value;pixels.data[d+3]=255;
+  }
+  const sorted=samples.slice().sort((p,q)=>p-q);
+  const lo=sorted[Math.floor(sorted.length*.02)]||0,hi=sorted[Math.min(sorted.length-1,Math.floor(sorted.length*.98))]||255,span=Math.max(12,hi-lo);
+  for(let i=0;i<samples.length;i++){
+   const v=Math.max(0,Math.min(255,(samples[i]-lo)*255/span));
+   const d=(Math.floor(i/out.width)+linePad)*line.width*4+(i%out.width)*4;
+   pixels.data[d]=pixels.data[d+1]=pixels.data[d+2]=v;
+  }
+  lctx.putImageData(pixels,0,0);
+  return line.toDataURL('image/png');
+ };
+ const chosen=cuts.slice(0,2);
+ const lines=chosen.map(([a,b])=>{
   const linePad=16,line=blank(makeCanvas,out.width,b-a+1+linePad*2),lctx=line.getContext('2d');
   lctx.fillStyle='white';lctx.fillRect(0,0,line.width,line.height);
   lctx.drawImage(out,0,a,out.width,b-a+1,0,linePad,out.width,b-a+1);
   return line.toDataURL('image/png');
  });
- return {image:url,lines};
+ const grayLines=chosen.map(([a,b])=>lineAt(a,b,(x,y)=>photo[y*width+x]));
+ return {image:url,lines,grayLines};
 }
 
 // Separate each spine at the shadow between books, then flatten uneven light.
@@ -175,7 +199,7 @@ export function analyzeShelf(source,makeCanvas=()=>document.createElement('canva
  const strips=[];
  for(const [x0,x1] of spans){
   const trimmed=adaptiveTrim(source,x0,y0,x1,y1,makeCanvas);
-  if(trimmed?.image)strips.push({image:trimmed.image,lines:trimmed.lines||[],bbox:[x0,y0,x1,y1]});
+  if(trimmed?.image)strips.push({image:trimmed.image,lines:trimmed.lines||[],grayLines:trimmed.grayLines||[],bbox:[x0,y0,x1,y1]});
  }
  return {band:{image:band.toDataURL('image/png'),mapWord:word=>({...word,bbox:{x0:word.bbox.x0/scale+x0,x1:word.bbox.x1/scale+x0,y0:word.bbox.y0/scale+y0,y1:word.bbox.y1/scale+y0}})},strips};
 }
