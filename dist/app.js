@@ -27,23 +27,8 @@ function showReadings(books){
   return item;
  }));
  $('readings').hidden=!books.length;
- return [...list.children];
-}
-const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
-async function explainOrder(books,items,token){
- phase('interpret','왼쪽 번호부터 다음 번호와 비교합니다.');
- const result=decreasingBooks(books),flagged=new Set(result.flagged);
- for(let i=0;i<books.length-1;i++){
-  if(token!==gate.revision||document.hidden||!items[i]?.isConnected||!items[i+1]?.isConnected)return null;
-  const pair=[items[i],items[i+1]];
-  pair.forEach(el=>el.classList.add('comparing'));
-  phase('interpret',`${i+1}번과 ${i+2}번을 비교하는 중`);
-  await wait(900);
-  pair.forEach(el=>el.classList.remove('comparing'));
-  if(token!==gate.revision||document.hidden)return null;
-  if(flagged.has(books[i]))items[i].classList.add('bad');
- }
- return result;
+ const flagged=new Set(decreasingBooks(books).flagged);
+ for(const [index,item] of [...list.children].entries())if(flagged.has(books[index]))item.className='bad';
 }
 function layout(){const stage=$('stage').getBoundingClientRect(),ratio=video.videoWidth/video.videoHeight;if(!Number.isFinite(ratio))return;let w=stage.width,h=w/ratio;if(h>stage.height){h=stage.height;w=h*ratio;}overlay.style.width=w+'px';overlay.style.height=h+'px';overlay.style.left=(stage.width-w)/2+'px';overlay.style.top=(stage.height-h)/2+'px';}
 window.addEventListener('resize',layout);
@@ -79,20 +64,11 @@ async function recognize(){
   const labels=await withTimeout(recognizeLabels(engine,encoded,image.width,image.height,()=>token===gate.revision&&!document.hidden,prepare));
   const books=refineBookEdges(labels,image);
   if(token!==gate.revision||document.hidden){gate.finish(token,false,performance.now());return;}
-  const items=showReadings(books);
-  if(books.length<2){
-   if(!gate.finish(token,false,performance.now())||document.hidden)return;
-   clearBoxes();phase('read','흰색 청구기호 두 줄이 선명하게 보이도록 가까이 비춰 주세요.');return;
-  }
-  await wait(700);
-  if(token!==gate.revision||document.hidden){gate.finish(token,false,performance.now());return;}
-  const result=await explainOrder(books,items,token);
-  if(!result){gate.finish(token,false,performance.now());return;}
+  showReadings(books);
+  const result=decreasingBooks(books);
   if(!gate.finish(token,result.complete,performance.now())||document.hidden)return;
   clearBoxes();
-  if(result.complete&&result.flagged.length)phase('done','빨간 번호는 뒤 번호보다 큽니다.','','alert');
-  else if(result.complete)phase('done','다른 단을 보려면 화면을 움직여 주세요.','정상 배치');
-  else phase('read','흰색 청구기호 두 줄이 선명하게 보이도록 가까이 비춰 주세요.');
+  if(!result.complete)phase('read','흰색 청구기호 두 줄이 선명하게 보이도록 가까이 비춰 주세요.');
  }catch(error){
   const fresh=gate.finish(token,false,performance.now());await resetWorker();
   if(fresh&&!document.hidden)phase('read',error.message||'선명한 책장 장면을 다시 확인합니다.');
