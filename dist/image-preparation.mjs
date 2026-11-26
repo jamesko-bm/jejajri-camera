@@ -40,36 +40,113 @@ export function detectionTiles(source,analysisWidth,makeCanvas=()=>document.crea
 
 function blank(makeCanvas,width,height){const canvas=makeCanvas();canvas.width=Math.max(1,Math.round(width));canvas.height=Math.max(1,Math.round(height));return canvas;}
 
+function isYellowInk(r,g,b){return r>185&&g>150&&b<130&&r>b+45&&g>b+20;}
+function isPaper(r,g,b){
+ const v=(r+g+b)/3,sat=Math.max(r,g,b)-Math.min(r,g,b);
+ return !isYellowInk(r,g,b)&&v>168&&sat<62;
+}
+
 function labelBand(data,width,height){
  const rows=[];
  for(let y=0;y<height;y++){
-  let white=0,blue=0,pink=0,yellow=0,edge=0,n=0;
+  let paper=0,blue=0,pink=0,yellow=0,edge=0,n=0;
   for(let x=1;x<width;x+=2){
-   const i=(y*width+x)*4,p=(y*width+x-1)*4,r=data[i],g=data[i+1],b=data[i+2],v=(r+g+b)/3;
+   const i=(y*width+x)*4,p=(y*width+x-1)*4,r=data[i],g=data[i+1],b=data[i+2];
    n++;
-   if(v>185&&Math.max(r,g,b)-Math.min(r,g,b)<40)white++;
+   if(isPaper(r,g,b))paper++;
    if(b>80&&b>r+25&&b>g+8)blue++;
    if(r>150&&r>g+30&&r>b+15)pink++;
-   if(r>185&&g>150&&b<125&&r>b+50&&g>b+25)yellow++;
+   if(isYellowInk(r,g,b))yellow++;
    if(Math.abs(r-data[p])+Math.abs(g-data[p+1])+Math.abs(b-data[p+2])>80)edge++;
   }
-  rows.push({white:white/n,blue:blue/n,pink:pink/n,yellow:yellow/n,edge:edge/n});
+  rows.push({paper:paper/n,blue:blue/n,pink:pink/n,yellow:yellow/n,edge:edge/n});
  }
- let bluePeak=0,blueAt=height,yellowPeak=0,yellowTop=height;
+ let yellowPeak=0,yellowTop=height,paperPeak=0,paperAt=Math.round(height/2);
  for(let y=0;y<height;y++){
-  if(rows[y].blue>bluePeak){bluePeak=rows[y].blue;blueAt=y;}
   if(rows[y].yellow>yellowPeak)yellowPeak=rows[y].yellow;
+  if(rows[y].paper>paperPeak){paperPeak=rows[y].paper;paperAt=y;}
  }
- if(yellowPeak>0.10){
+ if(yellowPeak>0.08){
   for(let y=0;y<height;y++)if(rows[y].yellow>yellowPeak*0.42){yellowTop=y;break;}
+  const bottom=Math.max(8,yellowTop-1),top=Math.max(0,yellowTop-Math.round(height*0.14));
+  let peak=0,at=Math.round((top+bottom)/2);
+  for(let y=top;y<bottom;y++)if(rows[y].paper>peak){peak=rows[y].paper;at=y;}
+  const half=Math.max(22,Math.round(height*0.04));
+  return [Math.max(top,at-half),bottom];
  }
- const badge=yellowPeak>0.10?yellowTop:bluePeak>0.12?blueAt:0;
- const searchBottom=badge?Math.max(16,badge-Math.max(4,Math.round(height*0.008))):Math.round(height*.92);
- const searchTop=badge?Math.max(0,badge-Math.max(64,Math.round(height*0.18))):Math.round(height*.28);
+ let first=-1,last=0;
+ for(let y=0;y<height;y++)if(rows[y].paper>Math.max(0.2,paperPeak*0.35)){if(first<0)first=y;last=y;}
+ if(paperPeak>0.25&&first>=0&&last-first>10)return [first,Math.min(height,last+1)];
+ const searchBottom=Math.round(height*.95),searchTop=Math.round(height*.18);
  let peak=0,at=Math.round((searchTop+searchBottom)/2);
- for(let y=searchTop;y<searchBottom;y++)if(rows[y].white>0.22&&rows[y].pink<0.08&&rows[y].edge>peak){peak=rows[y].edge;at=y;}
- const pad=Math.max(36,Math.round(height*0.045));
+ for(let y=searchTop;y<searchBottom;y++)if(rows[y].paper>0.18&&rows[y].pink<0.08&&rows[y].paper>=peak){peak=rows[y].paper;at=y;}
+ const pad=Math.max(28,Math.round(height*0.06));
  return [Math.max(0,at-pad),Math.min(searchBottom,at+pad+6)];
+}
+
+function columnPaper(data,width,y0,y1){
+ const raw=new Float64Array(width);
+ for(let x=0;x<width;x++){
+  let paper=0,n=0;
+  for(let y=y0;y<y1;y++){const i=(y*width+x)*4;n++;if(isPaper(data[i],data[i+1],data[i+2]))paper++;}
+  raw[x]=paper/Math.max(1,n);
+ }
+ return raw.map((_,x)=>{let sum=0,n=0;for(let k=-2;k<=2;k++){const i=x+k;if(i<0||i>=width)continue;sum+=raw[i];n++;}return sum/n;});
+}
+
+function hysteresisRuns(score,width,on,off,minW){
+ const spans=[];let inside=false,start=0;
+ for(let x=0;x<width;x++){
+  if(!inside&&score[x]>=on){inside=true;start=x;}
+  else if(inside&&score[x]<off){if(x-start>=minW)spans.push([start,x]);inside=false;}
+ }
+ if(inside&&width-start>=minW)spans.push([start,width]);
+ return spans;
+}
+
+function splitAtDips(spans,score){
+ const out=[];
+ for(const [a,b] of spans){
+  const minW=Math.max(10,Math.round((b-a)*0.16));
+  const cuts=[a];
+  for(let x=a+minW;x<b-minW;x++){
+   if(score[x]+0.03<score[x-2]&&score[x]<=score[x+2]&&score[x]<0.3&&x-cuts[cuts.length-1]>=minW)cuts.push(x);
+  }
+  cuts.push(b);
+  for(let i=0;i<cuts.length-1;i++)if(cuts[i+1]-cuts[i]>=minW)out.push([cuts[i],cuts[i+1]]);
+ }
+ return out;
+}
+
+function splitWideSpans(spans,score){
+ let out=spans;
+ for(let pass=0;pass<3;pass++){
+  if(out.length<2)return out;
+  const widths=out.map(([a,b])=>b-a).sort((a,b)=>a-b);
+  const typical=widths[Math.max(0,Math.floor(widths.length*0.35))]||widths[0];
+  const minW=Math.max(8,Math.round(typical*0.4));
+  const next=[];
+  let did=false;
+  for(const [a,b] of out){
+   if(b-a<=typical*1.5){next.push([a,b]);continue;}
+   const lo=a+Math.round((b-a)*0.2),hi=a+Math.round((b-a)*0.8);
+   let best=lo,bestV=1;
+   for(let x=lo;x<hi;x++)if(score[x]<=bestV){bestV=score[x];best=x;}
+   if(best-a>=minW&&b-best>=minW){next.push([a,best],[best,b]);did=true;}
+   else next.push([a,b]);
+  }
+  out=next;
+  if(!did)break;
+ }
+ return out;
+}
+
+function stickerSpans(data,width,y0,y1){
+ const score=columnPaper(data,width,y0,y1);
+ const max=Math.max(...score,0);
+ if(max<0.12)return [];
+ const on=Math.max(0.22,max*0.38),off=Math.max(0.1,on*0.55),minW=Math.max(8,Math.round(width*0.006));
+ return splitWideSpans(splitAtDips(hysteresisRuns(score,width,on,off,minW),score),score);
 }
 
 function shelfSpans(data,width,y0,y1){
@@ -175,7 +252,7 @@ function adaptiveTrim(source,x0,y0,x1,y1,makeCanvas){
   lctx.putImageData(pixels,0,0);
   return line.toDataURL('image/png');
  };
- const chosen=cuts.slice(0,2);
+ const chosen=cuts.slice(0,4);
  const lines=chosen.map(([a,b])=>{
   const linePad=16,line=blank(makeCanvas,out.width,b-a+1+linePad*2),lctx=line.getContext('2d');
   lctx.fillStyle='white';lctx.fillRect(0,0,line.width,line.height);
@@ -194,7 +271,9 @@ export function analyzeShelf(source,makeCanvas=()=>document.createElement('canva
  const probe=blank(makeCanvas,width,height),pctx=probe.getContext('2d',{willReadFrequently:true});
  pctx.drawImage(source,0,0,width,height);
  const {data}=pctx.getImageData(0,0,width,height);
- const [y0,y1]=labelBand(data,width,height),spans=shelfSpans(data,width,y0,y1);
+ const [y0,y1]=labelBand(data,width,height);
+ const stickers=stickerSpans(data,width,y0,y1),shadows=shelfSpans(data,width,y0,y1);
+ const spans=(stickers.length>=3&&stickers.length>=shadows.length?stickers:shadows.length>=stickers.length?shadows:stickers).map(([a,b])=>[Math.max(0,a-2),Math.min(width,b+2)]);
  if(spans.length<2)return {band:null,strips:[]};
  const scale=3,x0=spans[0][0],x1=spans[spans.length-1][1],bw=x1-x0;
  const band=blank(makeCanvas,bw*scale,(y1-y0)*scale),bctx=band.getContext('2d',{willReadFrequently:true});

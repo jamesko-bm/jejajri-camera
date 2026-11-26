@@ -1,9 +1,8 @@
-import {readLabels,cleanLabel,normalizeAuthor,parseShelfText,interpretCallNumber,circleAuthor,preferClass as pickClass,isFullClass,isCollectionBadge} from './labels.mjs';
+import {readLabels,cleanLabel,normalizeAuthor,parseShelfText,interpretCallNumber,circleAuthor,preferClass as pickClass,isFullClass,isCollectionBadge,snapShelfClasses} from './labels.mjs';
 
 const DIGIT_WHITELIST='0123456789.';
 const JAMO=Array.from({length:0x3163-0x3131+1},(_,i)=>String.fromCharCode(0x3131+i)).join('');
-const HANGUL=Array.from({length:0xD7A3-0xAC00+1},(_,i)=>String.fromCharCode(0xAC00+i)).join('');
-const AUTHOR_WHITELIST=`0123456789${JAMO}${HANGUL}`;
+const AUTHOR_WHITELIST=`0123456789가김나박이정최조한신슈스원${JAMO}`;
 
 function preferFields(primary,extra){
  return {
@@ -41,7 +40,7 @@ function mergeShelf(scene,strips){
  items.sort((a,b)=>a.bbox[0]-b.bbox[0]);
  const kept=items.flatMap(s=>{const ok=/^\d{3}(?:\.\d{1,4})?$/.test(s.classification);if(!ok&&!s.author)return [];return [{...s,classification:ok?s.classification:'',uncertain:s.uncertain||!ok}];});
  if(kept.length<2)return [];
- return kept.map((s,i)=>({id:`V${String(i+1).padStart(2,'0')}`,classification:s.classification,author:s.author||'',volume:s.volume||'',bbox:s.bbox.map(Math.round),labelBox:s.bbox.map(Math.round),confidence:s.confidence||0,confirmed:false,uncertain:!!s.uncertain}));
+ return snapShelfClasses(kept).map((s,i)=>({id:`V${String(i+1).padStart(2,'0')}`,classification:s.classification,author:s.author||'',volume:s.volume||'',bbox:s.bbox.map(Math.round),labelBox:s.bbox.map(Math.round),confidence:s.confidence||0,confirmed:false,uncertain:!!s.uncertain}));
 }
 
 async function recognizeShelf(engine,prepare,width,height,isCurrent){
@@ -84,14 +83,17 @@ async function recognizeShelf(engine,prepare,width,height,isCurrent){
   }
   if(!isCurrent())return [];
   if(lines[1]){
-   const authorLine=await readLine(lines[1],AUTHOR_WHITELIST);
+   const authorLine=preferFields(await readLine(lines[1],''),await readLine(lines[1],AUTHOR_WHITELIST));
    topAuthor=authorLine.author;
    parsed=preferFields(parsed,authorLine);
+   const circled=circleAuthor(authorLine.author);
+   if(circled)parsed.author=circled;
   }
-  if(!parsed.author)await take(gray[1],AUTHOR_WHITELIST,'author');
   if(!parsed.author)await take(gray[1],'','author');
-  if(!parsed.author)await take(invert[1],AUTHOR_WHITELIST,'author');
+  if(!parsed.author)await take(gray[1],AUTHOR_WHITELIST,'author');
+  if(!parsed.author)await take(invert[1],'','author');
   if(!parsed.author)await take(lines[1],'','author','8');
+  for(let i=2;i<lines.length;i++)parsed=preferFields(parsed,await readLine(lines[i],''));
   if(!parsed.author&&topAuthor&&!topWasClass)parsed=preferFields(parsed,{classification:'',author:topAuthor,volume:''});
   if(lines[0]&&!parsed.author&&!topWasClass){
    if(!isCurrent())return [];

@@ -32,17 +32,29 @@ function setView(next){
 }
 function paintBoxes(ctx,width,height,books){
  const flagged=new Set(decreasingBooks(books).flagged);
- ctx.strokeStyle='#ffe000';ctx.fillStyle='rgba(255,224,0,.12)';
+ ctx.textBaseline='top';ctx.textAlign='left';
  for(const book of books){
-  if(!flagged.has(book))continue;
   const [x,y,r,b]=book.bbox||book.labelBox;
   const left=Math.max(0,x),top=Math.max(0,y),right=Math.min(width,r),bottom=Math.min(height,b);
   const bw=Math.max(1,right-left),bh=Math.max(1,bottom-top);
-  const weight=Math.max(3,Math.round(Math.min(bw,bh)/16));
-  ctx.lineWidth=weight;
-  const inset=weight/2;
-  ctx.fillRect(left,top,bw,bh);
-  ctx.strokeRect(left+inset,top+inset,Math.max(1,bw-weight),Math.max(1,bh-weight));
+  if(flagged.has(book)){
+   ctx.strokeStyle='#ffe000';ctx.fillStyle='rgba(255,224,0,.12)';
+   const weight=Math.max(3,Math.round(Math.min(bw,bh)/16));
+   ctx.lineWidth=weight;
+   const inset=weight/2;
+   ctx.fillRect(left,top,bw,bh);
+   ctx.strokeRect(left+inset,top+inset,Math.max(1,bw-weight),Math.max(1,bh-weight));
+  }
+  const label=[book.classification,book.author,book.volume?`v.${book.volume}`:''].filter(Boolean).join(' ');
+  if(!label)continue;
+  const box=book.labelBox||book.bbox;
+  const tx=Math.max(0,box[0]),ty=Math.max(0,box[1]-2);
+  const size=Math.max(11,Math.min(22,Math.round((box[2]-box[0])*0.22)));
+  ctx.font=`700 ${size}px sans-serif`;
+  const tw=Math.min(bw,ctx.measureText(label).width+8),th=size+6;
+  ctx.fillStyle=flagged.has(book)?'#ffe000':'rgba(255,255,255,.92)';
+  ctx.fillRect(tx,ty,tw,th);
+  ctx.fillStyle='#111';ctx.fillText(label,tx+4,ty+3,Math.max(8,tw-6));
  }
 }
 function canvasesFromSource(source){

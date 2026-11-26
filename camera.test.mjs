@@ -1,9 +1,10 @@
 import {test} from 'node:test';import assert from 'node:assert/strict';
 import {decreasingBooks,RecognitionGate,frameDifference,cameraCandidates,refineBookEdges} from './dist/camera-core.mjs';
 import {readFileSync} from 'node:fs';
-import {readLabels,normalizeAuthor,parseShelfText,repairClass,interpretCallNumber} from './dist/labels.mjs';
+import {readLabels,normalizeAuthor,parseShelfText,repairClass,interpretCallNumber,snapShelfClasses} from './dist/labels.mjs';
 import {recognizeLabels} from './dist/recognition.mjs';
-import {improveCameraFocus} from './dist/image-preparation.mjs';
+import {improveCameraFocus,analyzeShelf} from './dist/image-preparation.mjs';
+import {createCanvas} from '@napi-rs/canvas';
 const book=(classification,id=classification,author='김10',volume='1')=>({id,classification,author,volume,bbox:[0,0,100,100]});
 const word=(text,x,y,width=55,height=18)=>({text,confidence:95,bbox:{x0:x,y0:y,x1:x+width,y1:y+height}});
 test('author spans never absorb text from the preceding book',()=>{
@@ -80,12 +81,18 @@ test('children shelf labels: 598.1, one-decimal class, yellow 500 badge, hyphen 
  assert.deepEqual(interpretCallNumber('598.1','슈38ㅋ'),call('598.1','슈38ㅋ'));
  assert.deepEqual(interpretCallNumber('598.1','이39-','c.2'),call('598.1','이39','2'));
  assert.deepEqual(interpretCallNumber('500','598.1','슈38ㅋ'),call('598.1','슈38ㅋ'));
- assert.deepEqual(interpretCallNumber('500\n슈38ㅋ'),call('500','슈38ㅋ'));
+ assert.deepEqual(interpretCallNumber('500\n슈38ㅋ'),call('','슈38ㅋ'));
+ assert.deepEqual(interpretCallNumber('598.1','신211○'),call('598.1','신211ㅇ'));
+ assert.deepEqual(interpretCallNumber('598.1','신53≡'),call('598.1','신53ㅋ'));
+ assert.equal(normalizeAuthor('신53트'),'신53ㅋ');
+ assert.equal(normalizeAuthor('ㅣ신68ㄷ'),'신68ㄷ');
+ assert.deepEqual(interpretCallNumber('598.1','신68ㅇ','v.1','c.2'),call('598.1','신68ㅇ','1'));
  const words=[word('598.1',20,100,40,16),word('이67ㄷ',20,122,40,16),word('500',20,150,40,18),word('598.1',120,100,40,16),word('이31ㄱ',120,122,40,16),word('500',120,150,40,18)];
  const books=readLabels(words,300,250);
  assert.deepEqual(books.map(b=>b.classification),['598.1','598.1']);
  assert.deepEqual(books.map(b=>b.author),['이67ㄷ','이31ㄱ']);
  assert.equal(decreasingBooks(books).flagged[0].author,'이67ㄷ');
+ assert.deepEqual(snapShelfClasses(['598.1','598.1','598.1','698.1','593.1'].map(classification=>({classification}))).map(b=>b.classification),['598.1','598.1','598.1','598.1','598.1']);
 });
 test('same class compares full jamo author, including numeric suffix',()=>{
  assert.equal(decreasingBooks([book('004.59','a','김94ㅎ'),book('004.59','b','김94ㄱ2')]).flagged[0].id,'a');
@@ -132,6 +139,13 @@ test('yellow boxes follow the painted book rectangle, not just the label',()=>{
  assert.ok(second[1]<=30&&second[3]>=154,String(second));
  assert.ok(refined[0].bbox[2]<=refined[1].bbox[0]+2);
 });
+test('white call-number stickers split even without dark spine shadows',()=>{
+ const w=800,h=140,canvas=createCanvas(w,h),ctx=canvas.getContext('2d');
+ ctx.fillStyle='#7a8a9a';ctx.fillRect(0,0,w,h);
+ for(let i=0;i<8;i++){ctx.fillStyle='#f3f3f3';ctx.fillRect(16+i*97,18,86,104);}
+ const shelf=analyzeShelf(canvas,()=>createCanvas(1,1));
+ assert.equal(shelf.strips.length,8,JSON.stringify(shelf.strips.map(s=>s.bbox)));
+});
 test('start offers image add and camera, then process with a blinking status and yellow book borders',()=>{
  const html=readFileSync(new URL('./dist/index.html',import.meta.url),'utf8'),app=readFileSync(new URL('./dist/app.js',import.meta.url),'utf8');
  assert.match(html,/id=["']add-images"/);assert.match(html,/>이미지 추가</);
@@ -142,6 +156,6 @@ test('start offers image add and camera, then process with a blinking status and
  assert.match(html,/\[처리 중\]/);assert.match(html,/autoplay muted playsinline/);
  assert.match(app,/setView\('start'\);\s*$/);assert.match(app,/\$\('use-camera'\)\.onclick/);
  assert.match(app,/createImageBitmap|image-files/);assert.match(app,/processBatch/);
- assert.match(app,/audio:false/);assert.match(app,/#ffe000/);assert.match(app,/strokeRect/);
+ assert.match(app,/audio:false/);assert.match(app,/#ffe000/);assert.match(app,/strokeRect/);assert.match(app,/fillText/);
  assert.doesNotMatch(app,/setInterval\(tick/);
 });

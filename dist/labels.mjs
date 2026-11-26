@@ -7,17 +7,17 @@ export const isFullClass = text => /^\d{3}\.\d{1,4}$/.test(text);
 export const isAnyClass = text => /^\d{3}(?:\.\d{1,4})?$/.test(text);
 // Yellow 500 / blue 000 stickers are location badges, not the call number.
 export function preferClass(current,next){
- if(!next||!isAnyClass(next))return current;
- if(!current)return next;
- if(isCollectionBadge(current)&&!isCollectionBadge(next))return next;
- if(!isCollectionBadge(current)&&isCollectionBadge(next))return current;
+ if(!next||!isAnyClass(next)||isCollectionBadge(next))return current&&!isCollectionBadge(current)?current:'';
+ if(!current||isCollectionBadge(current))return next;
  if(isFullClass(next)&&!isFullClass(current))return next;
  return current;
 }
 export function takeVolume(text){
  const flat=String(text||'').replace(/[|丨]/g,' ').replace(/\s+/g,' ').trim();
- const found=flat.match(/(?:^|\s)(?:c|v|권)\s*[.\s]?\s*([1-9]\d?)(?:\s|$)/i);
- return found?found[1]:'';
+ const volume=flat.match(/(?:^|\s)(?:v|권)\s*[.\s]?\s*([1-9]\d?)(?:\s|$)/i);
+ if(volume)return volume[1];
+ const copy=flat.match(/(?:^|\s)c\s*[.\s]?\s*([1-9]\d?)(?:\s|$)/i);
+ return copy?copy[1]:'';
 }
 // A leading 0 on an author line is the usual misread of 이, as in 0164ㄷ.
 function finishAuthor(compact){
@@ -30,10 +30,29 @@ function finishAuthor(compact){
  }
  return isAuthor(body)?body:'';
 }
+const AUTHOR_TAIL={트:'ㅋ',크:'ㅋ',르:'ㅋ',키:'ㅋ',오:'ㅇ',으:'ㅇ',우:'ㅇ',요:'ㅇ',로:'ㅇ',드:'ㄷ',디:'ㄷ'};
 export function normalizeAuthor(text){
- const compact=cleanLabel(text).replace(/[|丨\-‐‑–—/]/g,'');
- const closed=/^[0Oo]\d{3,}3$/.test(compact)?`${compact.slice(0,-1)}ㅋ`:compact;
- return finishAuthor(compact)||finishAuthor(compact.replace(/=+$/,'ㅋ'))||finishAuthor(closed);
+ const compact=cleanLabel(text).replace(/[|丨\-‐‑–—/]/g,'').replace(/[©○●∘◦®]/g,'ㅇ').replace(/[≡≣]/g,'ㅋ');
+ const tailed=AUTHOR_TAIL[compact.slice(-1)]?compact.slice(0,-1)+AUTHOR_TAIL[compact.slice(-1)]:compact;
+ const circled=/^[가-힣]{1,3}\d{1,4}[oO]$/.test(tailed)?`${tailed.slice(0,-1)}ㅇ`:tailed;
+ const closed=/^[0Oo]\d{3,}3$/.test(circled)?`${circled.slice(0,-1)}ㅋ`:circled;
+ const embedded=circled.match(/[가-힣]{1,3}\d{1,4}(?:[ㄱ-ㅎㅏ-ㅣ]\d{0,3})?/);
+ return finishAuthor(circled)||finishAuthor(compact.replace(/=+$/,'ㅋ'))||finishAuthor(closed)||(embedded?finishAuthor(embedded[0]):'');
+}
+export function snapShelfClasses(books){
+ const vals=books.map(b=>b.classification).filter(isFullClass);
+ if(vals.length<3)return books;
+ const counts=new Map();
+ for(const v of vals)counts.set(v,(counts.get(v)||0)+1);
+ let mode='',best=0;
+ for(const [v,n] of counts)if(n>best){mode=v;best=n;}
+ if(best<Math.max(3,Math.ceil(vals.length*.4)))return books;
+ return books.map(b=>{
+  const c=b.classification;
+  if(!c||c===mode||!isFullClass(c)||c.length!==mode.length)return b;
+  let diff=0;for(let i=0;i<c.length;i++)if(c[i]!==mode[i])diff++;
+  return diff<=2?{...b,classification:mode}:b;
+ });
 }
 // A round cutter mark is often read as © or a trailing 6. Keep it as ㅇ when the glyph is a circle.
 export function circleAuthor(text){
@@ -80,7 +99,7 @@ function readLineFields(line){
   }
   else pending+=token;
  }
- return {classification,author:normalizeAuthor(pending)};
+ return {classification,author:normalizeAuthor(pending)||circleAuthor(pending)};
 }
 // A spine label is two lines: 005.13 / 이211ㅋ or 598.1 / 슈38ㅋ. Either line may arrive first.
 export function interpretCallNumber(...parts){
