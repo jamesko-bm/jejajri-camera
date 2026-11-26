@@ -13,19 +13,39 @@ export function preferClass(current,next){
  if(isFullClass(next)&&isFullClass(current)&&/^\d{3}\.\d$/.test(next)&&!/^\d{3}\.\d$/.test(current))return next;
  return current;
 }
+export function scrubAuthor(author,classification,volume='',copy=''){
+ const n=(normalizeAuthor(author)||author||'').replace(/ㅇ[1lI]$/,'ㅇ');
+ if(!n)return '';
+ const d=String(classification||'').replace(/\./g,'');
+ if(d.length>=3&&n.includes(d)){
+  const rest=n.replace(d,'');
+  const ok=normalizeAuthor(rest);
+  if(ok&&/\d{2}/.test(ok))return ok;
+  return '';
+ }
+ const trail=n.match(/([ㄱ-ㅎ])([1-9])$/);
+ if(trail&&(trail[2]===String(volume||'')||trail[2]===String(copy||''))){
+  const rest=n.slice(0,-1);
+  if(isAuthor(rest))return rest;
+ }
+ return n;
+}
 export function preferAuthor(current,next){
  if(next&&isAuthor(next)&&(!current||!isAuthor(current)))return next;
  if(current&&isAuthor(current)&&next&&isAuthor(next)){
   if(/[ㄱ-ㅎ]$/.test(next)&&!/[ㄱ-ㅎ]$/.test(current))return next;
+  const cur4=/\d{4}/.test(current),next4=/\d{4}/.test(next);
+  if(next4&&!cur4)return current;
+  if(cur4&&!next4)return next;
   if(next.length>current.length&&next.startsWith(current.replace(/[ㄱ-ㅎ]$/,'').slice(0,Math.min(current.length,2))))return next;
  }
  if(next&&!current)return next;
- if(next&&isAuthor(next))return next;
+ if(next&&isAuthor(next)&&!isAuthor(current))return next;
  return current||'';
 }
 export function takeVolume(text){
  const flat=String(text||'').replace(/[|丨]/g,' ').replace(/\s+/g,' ').replace(/v\s*[.\s]*[zZ]/g,'v.2').trim();
- const volume=flat.match(/(?:v|권)[^\d]{0,4}([1-9])/i);
+ const volume=flat.replace(/v\s*[.\s]*[lI|]/g,'v.1').match(/(?:v|권)[^\d]{0,4}([1-9])/i);
  return volume?volume[1]:'';
 }
 export function takeCopy(text){
@@ -55,7 +75,7 @@ function compactAuthor(text){
  return cleanLabel(text).replace(/[|丨\-‐‑–—/'"`.,·ㆍ]/g,'').replace(/[©○●∘◦®]/g,'ㅇ').replace(/[≡≣]/g,'ㅋ');
 }
 export function normalizeAuthor(text){
- const compact=compactAuthor(text);
+ const compact=compactAuthor(text).replace(/(\d{3})9([ㅇoO])$/,'$1ㅇ').replace(/ㅇ[1lI]$/,'ㅇ');
  const circledEnd=/^([가-힣]{1,3}\d{1,4})[ㄱ-ㅎ]?ㅇ$/.test(compact)?compact.replace(/[ㄱ-ㅎ]?ㅇ$/,'ㅇ'):compact;
  const tailed=AUTHOR_TAIL[circledEnd.slice(-1)]?circledEnd.slice(0,-1)+AUTHOR_TAIL[circledEnd.slice(-1)]:circledEnd;
  const circled=/^[가-힣]{1,3}\d{1,4}[oO]$/.test(tailed)?`${tailed.slice(0,-1)}ㅇ`:tailed;
@@ -101,7 +121,8 @@ export function snapShelfClasses(books){
  return books.map(b=>{
   const c=b.classification;
   if(!c||c===mode)return b;
-  if(!isFullClass(c)||classDiff(c,mode)<=2)return {...b,classification:mode};
+  const one=/^\d{3}\.\d$/.test(mode)&&/^\d{3}\.\d$/.test(c);
+  if(!isFullClass(c)||classDiff(c,mode)<=(one?3:2))return {...b,classification:mode};
   return b;
  });
 }

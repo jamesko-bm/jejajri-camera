@@ -1,15 +1,20 @@
-import {readLabels,cleanLabel,normalizeAuthor,parseShelfText,interpretCallNumber,interpretAuthorLine,extractAuthorMark,circleAuthor,preferClass as pickClass,preferAuthor,isAuthor,isFullClass,isCollectionBadge,snapShelfClasses,snapShelfAuthors} from './labels.mjs';
+import {readLabels,cleanLabel,normalizeAuthor,parseShelfText,interpretCallNumber,interpretAuthorLine,extractAuthorMark,circleAuthor,preferClass as pickClass,preferAuthor,scrubAuthor,isAuthor,isFullClass,isCollectionBadge,snapShelfClasses,snapShelfAuthors} from './labels.mjs';
 
 const DIGIT_WHITELIST='0123456789.';
 const JAMO=Array.from({length:0x3163-0x3131+1},(_,i)=>String.fromCharCode(0x3131+i)).join('');
 const AUTHOR_WHITELIST=`0123456789가김나박이정최조한신슈스원${JAMO}`;
 
 function preferFields(primary,extra){
+ const classification=pickClass(primary.classification,extra.classification)||primary.classification||extra.classification||'';
+ const volume=primary.volume||extra.volume||'';
+ const copy=primary.copy||extra.copy||'';
+ const a=scrubAuthor(primary.author,classification,volume,copy);
+ const b=scrubAuthor(extra.author,classification,volume,copy);
  return {
-  classification:pickClass(primary.classification,extra.classification)||primary.classification||'',
-  author:preferAuthor(primary.author,extra.author)||primary.author||extra.author||'',
-  volume:primary.volume||extra.volume||'',
-  copy:primary.copy||extra.copy||''
+  classification,
+  author:preferAuthor(a,b)||a||b||'',
+  volume,
+  copy
  };
 }
 function asAuthor(fields){
@@ -44,7 +49,10 @@ function mergeShelf(scene,strips){
  }
  items.sort((a,b)=>a.bbox[0]-b.bbox[0]);
  if(!items.length)return [];
- return snapShelfAuthors(snapShelfClasses(items)).map((s,i)=>({id:`V${String(i+1).padStart(2,'0')}`,classification:s.classification,author:s.author||'',volume:s.volume||'',copy:s.copy||'',bbox:s.bbox.map(Math.round),labelBox:s.bbox.map(Math.round),confidence:s.confidence||0,confirmed:false,uncertain:!!s.uncertain||!isFullClass(s.classification)||!isAuthor(s.author||'')}));
+ return snapShelfAuthors(snapShelfClasses(items)).map((s,i)=>{
+  const author=scrubAuthor(s.author,s.classification,s.volume,s.copy);
+  return {id:`V${String(i+1).padStart(2,'0')}`,classification:s.classification,author,volume:s.volume||'',copy:s.copy||'',bbox:s.bbox.map(Math.round),labelBox:s.bbox.map(Math.round),confidence:s.confidence||0,confirmed:false,uncertain:!!s.uncertain||!isFullClass(s.classification)||!isAuthor(author||'')};
+ });
 }
 
 async function recognizeShelf(engine,prepare,width,height,isCurrent){
@@ -57,16 +65,15 @@ async function recognizeShelf(engine,prepare,width,height,isCurrent){
   if(!String(strip.image).startsWith('data:image'))continue;
   const lines=Array.isArray(strip.lines)?strip.lines:[];
   const gray=Array.isArray(strip.grayLines)?strip.grayLines:[];
-  const invert=Array.isArray(strip.invertLines)?strip.invertLines:[];
   const readLine=async (image,whitelist,psm='7')=>{
    if(!image||!isCurrent())return {classification:'',author:'',volume:'',copy:''};
    await engine.setParameters({tessedit_pageseg_mode:String(psm),tessedit_char_whitelist:whitelist});
    const {data:line}=await engine.recognize(image);
    return interpretCallNumber(line?.text||'');
   };
-  const readAuthor=async (image,psm='7')=>{
+  const readAuthor=async (image,psm='7',whitelist='')=>{
    if(!image||!isCurrent())return {classification:'',author:'',volume:'',copy:''};
-   await engine.setParameters({tessedit_pageseg_mode:String(psm),tessedit_char_whitelist:''});
+   await engine.setParameters({tessedit_pageseg_mode:String(psm),tessedit_char_whitelist:whitelist});
    const {data:line}=await engine.recognize(image);
    return interpretAuthorLine(line?.text||'');
   };
@@ -76,37 +83,48 @@ async function recognizeShelf(engine,prepare,width,height,isCurrent){
    const fields=await readLine(image,whitelist,psm);
    parsed=preferFields(parsed,{classification:fields.classification,author:fields.author,volume:fields.volume,copy:fields.copy});
   };
-  const takeAuthor=async (image,psm='7')=>{
+  const takeAuthor=async (image,psm='7',whitelist='')=>{
    if(!image||!isCurrent())return;
-   parsed=preferFields(parsed,asAuthor(await readAuthor(image,psm)));
+   parsed=preferFields(parsed,asAuthor(await readAuthor(image,psm,whitelist)));
   };
   if(!isCurrent())return [];
-  await engine.setParameters({tessedit_pageseg_mode:'6',tessedit_char_whitelist:''});
-  const {data}=await engine.recognize(strip.image);
-  confidence=data.confidence||0;
-  parsed=preferFields(parsed,interpretCallNumber(data.text||''));
-  const circledWhole=circleAuthor(data.text||'');
-  if(circledWhole)parsed.author=preferAuthor(parsed.author,circledWhole)||circledWhole;
-  if(!parsed.author){const mark=extractAuthorMark(data.text||'');if(mark)parsed.author=mark;}
-  if(lines[0])await takeClass(lines[0],'');
-  if(lines[0]&&!isFullClass(parsed.classification))await takeClass(gray[0],'');
-  if(lines[0]&&!isFullClass(parsed.classification))await takeClass(invert[0],'');
+  if(gray[0])await takeClass(gray[0],'');
+  if(lines[0]&&!isFullClass(parsed.classification))await takeClass(lines[0],'');
   if(lines[0]&&!isFullClass(parsed.classification))await takeClass(lines[0],DIGIT_WHITELIST);
-  if(lines[0]&&/^[17]\d{2}\.\d{1,4}$/.test(parsed.classification)){
-   const open=await readLine(lines[0],'');
+  if(gray[0]&&/^[17]\d{2}\.\d{1,4}$/.test(parsed.classification)){
+   const open=await readLine(gray[0],'');
    if(/^00\d\.\d{1,4}$/.test(open.classification))parsed={...parsed,classification:open.classification};
   }
   if(!isCurrent())return [];
   if(lines[1])await takeAuthor(lines[1]);
-  if(!parsed.author)await takeAuthor(gray[1]);
-  if(!parsed.author)await takeAuthor(lines[1],'8');
-  if(!parsed.author)await takeAuthor(invert[1]);
-  if(!parsed.author&&lines[0])await takeAuthor(lines[0]);
-  for(let i=2;i<lines.length;i++)parsed=preferFields(parsed,asAuthor(await readAuthor(lines[i])));
-  if(lines[1]&&!isFullClass(parsed.classification)){
-   if(!isCurrent())return [];
-   parsed=preferFields(parsed,await readLine(lines[1],DIGIT_WHITELIST));
+  if(lines[1])await takeAuthor(lines[1],'8');
+  if(gray[1])await takeAuthor(gray[1],'7',AUTHOR_WHITELIST);
+  if(gray[1])await takeAuthor(gray[1],'8',AUTHOR_WHITELIST);
+  if(!isAuthor(parsed.author)&&gray[1])await takeAuthor(gray[1]);
+  if(!isAuthor(parsed.author)&&gray[1])await takeAuthor(gray[1],'8');
+  if(!parsed.author&&lines[0])await takeAuthor(gray[0]||lines[0]);
+  for(let i=2;i<Math.max(lines.length,gray.length);i++){
+   parsed=preferFields(parsed,asAuthor(await readAuthor(gray[i]||lines[i])));
+   if(lines[i])parsed=preferFields(parsed,asAuthor(await readAuthor(lines[i])));
   }
+  if(!isCurrent())return [];
+  let wholeText='';
+  const takeWhole=async image=>{
+   if(!image||!isCurrent())return;
+   await engine.setParameters({tessedit_pageseg_mode:'6',tessedit_char_whitelist:''});
+   const {data}=await engine.recognize(image);
+   confidence=Math.max(confidence,data.confidence||0);
+   wholeText=`${wholeText}\n${data.text||''}`;
+   const whole=interpretCallNumber(data.text||'');
+   if(!isFullClass(parsed.classification)&&whole.classification)parsed=preferFields(parsed,whole);
+   else if(whole.author||whole.volume||whole.copy)parsed=preferFields(parsed,{classification:'',author:whole.author,volume:whole.volume,copy:whole.copy});
+  };
+  if(strip.grayImage)await takeWhole(strip.grayImage);
+  await takeWhole(strip.image);
+  const circledWhole=scrubAuthor(circleAuthor(wholeText),parsed.classification,parsed.volume,parsed.copy);
+  if(circledWhole)parsed.author=preferAuthor(parsed.author,circledWhole)||circledWhole;
+  if(!parsed.author)parsed.author=scrubAuthor(extractAuthorMark(wholeText),parsed.classification,parsed.volume,parsed.copy);
+  parsed.author=scrubAuthor(parsed.author,parsed.classification,parsed.volume,parsed.copy);
   strips.push({classification:parsed.classification,author:parsed.author,volume:parsed.volume||'',copy:parsed.copy||'',uncertain:!isFullClass(parsed.classification)||!isAuthor(parsed.author||''),bbox:strip.bbox,confidence});
  }
  return mergeShelf(books,strips);

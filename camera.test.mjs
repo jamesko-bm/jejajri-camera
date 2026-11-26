@@ -1,7 +1,7 @@
 import {test} from 'node:test';import assert from 'node:assert/strict';
 import {decreasingBooks,RecognitionGate,frameDifference,cameraCandidates,refineBookEdges} from './dist/camera-core.mjs';
 import {readFileSync} from 'node:fs';
-import {readLabels,normalizeAuthor,parseShelfText,repairClass,interpretCallNumber,interpretAuthorLine,extractAuthorMark,snapShelfClasses,snapShelfAuthors,formatCallNumber,preferAuthor} from './dist/labels.mjs';
+import {readLabels,normalizeAuthor,parseShelfText,repairClass,interpretCallNumber,interpretAuthorLine,extractAuthorMark,snapShelfClasses,snapShelfAuthors,formatCallNumber,preferAuthor,scrubAuthor} from './dist/labels.mjs';
 import {recognizeLabels} from './dist/recognition.mjs';
 import {improveCameraFocus,analyzeShelf} from './dist/image-preparation.mjs';
 import {createCanvas} from '@napi-rs/canvas';
@@ -90,7 +90,9 @@ test('children shelf labels: 598.1, one-decimal class, yellow 500 badge, hyphen 
  assert.equal(normalizeAuthor('신68ㄷㅇ'),'신68ㅇ');
  assert.equal(normalizeAuthor('ㅣ신68ㄷ'),'신68ㄷ');
  assert.equal(preferAuthor('신53','신53ㅋ'),'신53ㅋ');
+ assert.equal(preferAuthor('신68ㅇ','신5981ㅇ'),'신68ㅇ');
  assert.equal(interpretCallNumber('v.z').volume,'2');
+ assert.equal(interpretCallNumber('v.l').volume,'1');
  assert.deepEqual(interpretCallNumber('598.1','신68ㅇ','v.1','c.2'),call('598.1','신68ㅇ','1','2'));
  assert.equal(formatCallNumber({classification:'598.1',author:'신68ㅇ',volume:'1',copy:'2'}),'598.1 신68ㅇ v.1 c.2');
  assert.equal(formatCallNumber({classification:'598.1',author:''}),'598.1');
@@ -99,6 +101,12 @@ test('children shelf labels: 598.1, one-decimal class, yellow 500 badge, hyphen 
  assert.deepEqual(interpretCallNumber('598.1','211ㅇ'),call('598.1','211ㅇ'));
  assert.deepEqual(interpretCallNumber('598.1\n211ㅇ'),call('598.1','211ㅇ'));
  assert.equal(extractAuthorMark('211ㅇ'),'211ㅇ');
+ assert.equal(scrubAuthor('신5981ㅇ','598.1'),'');
+ assert.equal(scrubAuthor('신68ㅇ','598.1'),'신68ㅇ');
+ assert.equal(scrubAuthor('신68ㅇ1','598.1','3','2'),'신68ㅇ');
+ assert.equal(normalizeAuthor('신2119ㅇ'),'신211ㅇ');
+ assert.equal(normalizeAuthor('신2259ㅇ'),'신225ㅇ');
+ assert.equal(normalizeAuthor('신68ㅇ1'),'신68ㅇ');
  assert.equal(extractAuthorMark('c.2'),'');
  assert.equal(interpretAuthorLine('211ㅇ').author,'211ㅇ');
  assert.equal(interpretAuthorLine('신53≡').author,'신53ㅋ');
@@ -111,6 +119,7 @@ test('children shelf labels: 598.1, one-decimal class, yellow 500 badge, hyphen 
  assert.equal(decreasingBooks(books).flagged[0].author,'이67ㄷ');
  assert.deepEqual(snapShelfClasses(['598.1','598.1','598.1','698.1','593.1'].map(classification=>({classification}))).map(b=>b.classification),['598.1','598.1','598.1','598.1','598.1']);
  assert.deepEqual(snapShelfClasses(['508.1','598.1','698.1','588.1','598.68'].map(classification=>({classification}))).map(b=>b.classification),['598.1','598.1','598.1','598.1','598.1']);
+ assert.deepEqual(snapShelfClasses(['222.1','598.1','598.1','228.1','598.1'].map(classification=>({classification}))).map(b=>b.classification),['598.1','598.1','598.1','598.1','598.1']);
 });
 test('same class compares full jamo author, including numeric suffix',()=>{
  assert.equal(decreasingBooks([book('004.59','a','김94ㅎ'),book('004.59','b','김94ㄱ2')]).flagged[0].id,'a');
@@ -169,6 +178,25 @@ test('white call-number stickers split even without dark spine shadows',()=>{
  for(let i=0;i<8;i++){ctx.fillStyle='#f3f3f3';ctx.fillRect(16+i*97,18,86,104);}
  const shelf=analyzeShelf(canvas,()=>createCanvas(1,1));
  assert.equal(shelf.strips.length,8,JSON.stringify(shelf.strips.map(s=>s.bbox)));
+});
+test('shadow gaps between white labels split each book',()=>{
+ const w=960,h=110,n=8,canvas=createCanvas(w,h),ctx=canvas.getContext('2d');
+ ctx.fillStyle='#5c6570';ctx.fillRect(0,0,w,h);
+ for(let i=0;i<n;i++){ctx.fillStyle='#f4f4f4';ctx.fillRect(i*120+6,8,108,94);}
+ const shelf=analyzeShelf(canvas,()=>createCanvas(1,1));
+ assert.equal(shelf.strips.length,n,JSON.stringify(shelf.strips.map(s=>s.bbox)));
+});
+test('faint shadows between stickers split books; printed text does not',()=>{
+ const w=1024,h=102,n=8,canvas=createCanvas(w,h),ctx=canvas.getContext('2d');
+ ctx.fillStyle='#c8ccd0';ctx.fillRect(0,0,w,h);
+ const slot=w/n;
+ for(let i=0;i<n;i++){
+  ctx.fillStyle='#f2f2f2';ctx.fillRect(i*slot+3,3,slot-8,h-6);
+  ctx.fillStyle='#222';ctx.fillRect(i*slot+18,16,48,12);ctx.fillRect(i*slot+18,38,40,12);
+  if(i>=5){ctx.fillRect(i*slot+22,60,28,10);ctx.fillRect(i*slot+22,78,24,10);}
+ }
+ const shelf=analyzeShelf(canvas,()=>createCanvas(1,1));
+ assert.equal(shelf.strips.length,n,JSON.stringify(shelf.strips.map(s=>s.bbox)));
 });
 test('label band sits above the lower 500 badges, not upper yellow covers',()=>{
  const w=900,h=300,canvas=createCanvas(w,h),ctx=canvas.getContext('2d');
