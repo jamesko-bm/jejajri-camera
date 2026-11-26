@@ -8,19 +8,28 @@ button:focus-visible{outline:3px solid #ffdf52;outline-offset:4px}
 .camera-stage{position:absolute;inset:0;display:flex;align-items:center;justify-content:center}
 video{display:block;width:100%;height:100%;object-fit:contain}
 canvas{position:absolute;pointer-events:none}
-header{position:absolute;top:0;left:0;right:0;display:flex;align-items:center;justify-content:space-between;padding:calc(20px + env(safe-area-inset-top)) 24px 30px;background:linear-gradient(#071610b3,transparent);pointer-events:none}
+header{position:absolute;top:0;left:0;right:0;display:flex;align-items:center;justify-content:space-between;padding:calc(20px + env(safe-area-inset-top)) 24px 30px;background:linear-gradient(#071610b3,transparent);pointer-events:none;z-index:4}
 .brand{font-size:22px;font-weight:700;letter-spacing:-1px}
 .live-label{font-size:13px;color:#e3ece6;letter-spacing:1px}
-.processing{position:absolute;z-index:5;left:50%;top:42%;transform:translate(-50%,-50%);margin:0;padding:14px 22px;background:#14291fe8;border:1px solid #ffe000;border-radius:16px;font-size:28px;font-weight:800;letter-spacing:-.4px;color:#fff6cc;box-shadow:0 8px 28px #0008;animation:step-blink .7s steps(2,end) infinite}
+.welcome{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:0 32px 80px;text-align:center;z-index:2}
+.welcome p{margin:0;font-size:17px;line-height:1.7;color:#e8f2ec;text-shadow:0 1px 8px #0008}
+.processing{position:absolute;z-index:8;left:50%;top:42%;transform:translate(-50%,-50%);margin:0;padding:14px 22px;background:#14291fe8;border:1px solid #ffe000;border-radius:16px;font-size:28px;font-weight:800;letter-spacing:-.4px;color:#fff6cc;box-shadow:0 8px 28px #0008;animation:step-blink .7s steps(2,end) infinite}
+.shots{position:absolute;z-index:4;left:0;right:0;top:calc(64px + env(safe-area-inset-top));display:flex;gap:8px;overflow-x:auto;padding:0 16px;pointer-events:auto}
+.shots img{height:56px;width:auto;border-radius:8px;border:2px solid #ffe000;background:#0b1a14;flex:0 0 auto}
+.results{position:absolute;inset:0;z-index:3;overflow:auto;display:flex;flex-direction:column;gap:16px;padding:calc(72px + env(safe-area-inset-top)) 12px calc(140px + env(safe-area-inset-bottom));-webkit-overflow-scrolling:touch}
+.results canvas{position:relative;width:100%;height:auto;border-radius:12px;background:#0b1a14}
 footer{position:absolute;z-index:6;bottom:0;left:0;right:0;display:flex;flex-direction:column;align-items:center;gap:10px;padding:28px 20px calc(18px + env(safe-area-inset-bottom));text-align:center;background:linear-gradient(transparent,#071610e6);pointer-events:none}
 footer p{font-size:15px;margin:0;color:#fff;text-shadow:0 1px 5px #000}
 footer span{font-size:12px;color:#c7d6cc}
-#read-shelf{pointer-events:auto;min-width:168px;min-height:52px;padding:12px 28px;border:0;border-radius:999px;background:#ffe000;color:#1c1a08;font-size:18px;font-weight:800;letter-spacing:-.3px;cursor:pointer;box-shadow:0 6px 18px #0006}
-#read-shelf:disabled{background:#efe6a4;color:#1c1a0880;cursor:default}
+.actions{display:flex;flex-wrap:wrap;justify-content:center;gap:10px;pointer-events:auto;width:100%}
+.actions button{min-width:132px;min-height:52px;padding:12px 22px;border:0;border-radius:999px;background:#e3f0e6;color:#15382a;font-size:17px;font-weight:800;letter-spacing:-.3px;cursor:pointer;box-shadow:0 6px 18px #0006}
+.actions button.primary{background:#ffe000;color:#1c1a08}
+.actions button:disabled{background:#efe6a4;color:#1c1a0880;cursor:default}
 .error{position:absolute;z-index:7;left:50%;top:50%;transform:translate(-50%,-50%);width:min(390px,calc(100% - 40px));padding:26px;background:#20372fef;border:1px solid #ffffff30;border-radius:16px;text-align:center}
 .error h1{font-size:19px;margin:0 0 12px}
 .error p{font-size:14px;color:#d8e4dd;line-height:1.8;margin:0 0 20px}
+.error-actions{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
 .error button{background:#e3f0e6;color:#15382a;border:0;border-radius:8px;padding:11px 18px;font-size:14px;font-weight:600;cursor:pointer}
 @keyframes step-blink{50%{opacity:.25}}
 @media(prefers-reduced-motion:reduce){.processing{animation:none}}
-@media(max-height:500px){header{padding-top:12px}footer{padding-bottom:12px}.processing{font-size:22px}}
+@media(max-height:500px){header{padding-top:12px}footer{padding-bottom:12px}.processing{font-size:22px}.welcome p{font-size:15px}}

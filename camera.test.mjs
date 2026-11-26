@@ -89,4 +89,16 @@ test('incomplete OCR retries automatically; slow cumulative motion invalidates',
 test('uniform exposure change and slight noise do not count as motion',()=>{assert.equal(frameDifference([20,50,80],[30,60,90]),0);assert.ok(frameDifference([20,50,80],[21,49,80])<1);});
 test('visibility reset waits for in-flight OCR and never accepts its stale result',()=>{const gate=new RecognitionGate();const sig=[10,30,80];gate.tick(sig,0);gate.tick(sig,1100);const token=gate.begin();gate.reset();gate.tick(sig,2000);assert.equal(gate.tick(sig,3100).ready,false);assert.equal(gate.finish(token,true,3200),false);assert.equal(gate.tick(sig,3300).ready,true);});
 test('camera candidates and image edge refinement retain bounds',()=>{const w=(text,x,y)=>({text,confidence:90,bbox:{x0:x,y0:y,x1:x+25,y1:y+15}});const rows=cameraCandidates([w('400',10,100),w('김10',10,125),w('300',100,100),w('박2',100,125)],200,200);assert.equal(rows.length,2);assert.equal(decreasingBooks(rows).flagged.length,1);const image={width:200,height:200,data:new Uint8ClampedArray(200*200*4)};const refined=refineBookEdges(rows,image);assert.equal(refined[0].bbox[0],0);assert.equal(refined[1].bbox[2],200);assert.ok(refined[0].bbox[2]<=refined[1].bbox[0]);assert.deepEqual(cameraCandidates([],200,200),[]);});
-test('one shelf photo is read from the camera and misplaced numbers are boxed in yellow',()=>{const html=readFileSync(new URL('./dist/index.html',import.meta.url),'utf8'),app=readFileSync(new URL('./dist/app.js',import.meta.url),'utf8');assert.doesNotMatch(html,/type=["']file|sample-top|id=["']analyze|id=["']ocr/);assert.match(html,/autoplay muted playsinline/);assert.match(html,/id=["']read-shelf"/);assert.match(html,/>책장 읽기</);assert.match(html,/\[처리 중\]/);assert.match(app,/void startCamera\(\)/);assert.match(app,/audio:false/);assert.match(app,/#ffe000/);assert.doesNotMatch(app,/setInterval\(tick/);});
+test('start offers image add and camera, then process with a blinking status and yellow book borders',()=>{
+ const html=readFileSync(new URL('./dist/index.html',import.meta.url),'utf8'),app=readFileSync(new URL('./dist/app.js',import.meta.url),'utf8');
+ assert.match(html,/id=["']add-images"/);assert.match(html,/>이미지 추가</);
+ assert.match(html,/id=["']use-camera"/);assert.match(html,/>카메라 사용</);
+ assert.match(html,/id=["']image-files"[^>]*type=["']file"/);assert.match(html,/multiple/);
+ assert.match(html,/id=["']capture"/);assert.match(html,/>촬영</);
+ assert.match(html,/id=["']finish"/);assert.match(html,/>완료</);
+ assert.match(html,/\[처리 중\]/);assert.match(html,/autoplay muted playsinline/);
+ assert.match(app,/setView\('start'\);\s*$/);assert.match(app,/\$\('use-camera'\)\.onclick/);
+ assert.match(app,/createImageBitmap|image-files/);assert.match(app,/processBatch/);
+ assert.match(app,/audio:false/);assert.match(app,/#ffe000/);assert.match(app,/strokeRect/);
+ assert.doesNotMatch(app,/setInterval\(tick/);
+});

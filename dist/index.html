@@ -2,23 +2,48 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="description" content="책장 사진을 한 장 찍으면 청구기호를 읽고, 잘못 꽂힌 번호에 노란색 상자를 그립니다.">
+<meta name="description" content="책장 사진을 여러 장 고르거나 카메라로 찍은 뒤, 잘못 꽂힌 책에 노란색 테두리를 그립니다.">
 <meta name="theme-color" content="#10231d"><title>제자리 · 카메라</title>
 <link rel="stylesheet" href="style.css"><script type="module" src="app.js"></script>
 </head>
 <body>
 <main class="camera-app" aria-label="제자리 책장 사진 확인">
   <div class="camera-stage" id="stage">
-    <video id="camera" autoplay muted playsinline aria-label="사진 찍는 화면"></video>
+    <video id="camera" autoplay muted playsinline hidden aria-label="사진 찍는 화면"></video>
     <canvas id="overlay" hidden aria-hidden="true"></canvas>
+    <div id="welcome" class="welcome">
+      <p>책장 사진을 1장 이상 고르거나<br>카메라로 여러 장을 찍은 뒤 완료를 눌러 주세요.</p>
+    </div>
+    <div id="shots" class="shots" hidden></div>
+    <div id="results" class="results" hidden></div>
   </div>
-  <header><span class="brand">▥ 제자리</span><span class="live-label">카메라</span></header>
+  <header><span class="brand">▥ 제자리</span><span id="live-label" class="live-label">선택</span></header>
   <p id="processing" class="processing" hidden role="status" aria-live="polite">[처리 중]</p>
-  <div id="error" class="error" role="alert" hidden><h1 id="error-title">카메라 연결이 필요합니다</h1><p id="error-detail"></p><button id="retry" type="button">카메라 다시 연결</button></div>
+  <div id="error" class="error" role="alert" hidden>
+    <h1 id="error-title">카메라 연결이 필요합니다</h1>
+    <p id="error-detail"></p>
+    <div class="error-actions">
+      <button id="retry" type="button">카메라 다시 연결</button>
+      <button id="error-home" type="button">처음으로</button>
+    </div>
+  </div>
   <footer>
-    <p id="hint">카메라 사용을 허용해 주세요.</p>
-    <button id="read-shelf" type="button" disabled>책장 읽기</button>
-    <span>한 장씩 확인합니다 · 영상은 저장·전송하지 않습니다</span>
+    <p id="hint">이미지 추가 또는 카메라 사용을 눌러 주세요.</p>
+    <div id="start-actions" class="actions">
+      <button id="add-images" class="primary" type="button">이미지 추가</button>
+      <button id="use-camera" class="primary" type="button">카메라 사용</button>
+    </div>
+    <div id="camera-actions" class="actions" hidden>
+      <button id="cancel-camera" type="button">취소</button>
+      <button id="capture" class="primary" type="button">촬영</button>
+      <button id="finish" type="button" disabled>완료</button>
+    </div>
+    <div id="result-actions" class="actions" hidden>
+      <button id="again" class="primary" type="button">처음으로</button>
+    </div>
+    <input id="image-files" type="file" accept="image/*" multiple hidden>
+    <span>사진은 기기 안에서만 처리하며 저장·전송하지 않습니다</span>
   </footer>
 </main>
-</body></html>
+</body>
+</html>
