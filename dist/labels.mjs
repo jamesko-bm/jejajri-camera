@@ -10,16 +10,25 @@ export function preferClass(current,next){
  if(!next||!isAnyClass(next)||isCollectionBadge(next))return current&&!isCollectionBadge(current)?current:'';
  if(!current||isCollectionBadge(current))return next;
  if(isFullClass(next)&&!isFullClass(current))return next;
+ if(isFullClass(next)&&isFullClass(current)&&/^\d{3}\.\d$/.test(next)&&!/^\d{3}\.\d$/.test(current))return next;
  return current;
 }
+export function preferAuthor(current,next){
+ if(next&&isAuthor(next)&&(!current||!isAuthor(current)))return next;
+ if(current&&isAuthor(current)&&next&&isAuthor(next)){
+  if(/[ㄱ-ㅎ]$/.test(next)&&!/[ㄱ-ㅎ]$/.test(current))return next;
+  if(next.length>current.length&&next.startsWith(current.replace(/[ㄱ-ㅎ]$/,'').slice(0,Math.min(current.length,2))))return next;
+ }
+ return current||'';
+}
 export function takeVolume(text){
- const flat=String(text||'').replace(/[|丨]/g,' ').replace(/\s+/g,' ').trim();
- const volume=flat.match(/(?:^|\s)(?:v|권)\s*[.\s]?\s*([1-9]\d?)(?:\s|$)/i);
+ const flat=String(text||'').replace(/[|丨]/g,' ').replace(/\s+/g,' ').replace(/v\s*[.\s]*[zZ]/g,'v.2').trim();
+ const volume=flat.match(/(?:v|권)[^\d]{0,4}([1-9])/i);
  return volume?volume[1]:'';
 }
 export function takeCopy(text){
  const flat=String(text||'').replace(/[|丨]/g,' ').replace(/\s+/g,' ').trim();
- const copy=flat.match(/(?:^|\s)c\s*[.\s]?\s*([1-9]\d?)(?:\s|$)/i);
+ const copy=flat.match(/(?:^|[^a-z])c[^\d]{0,3}([1-9])/i);
  return copy?copy[1]:'';
 }
 export function formatCallNumber(book){
@@ -41,26 +50,54 @@ function finishAuthor(compact){
 }
 const AUTHOR_TAIL={트:'ㅋ',크:'ㅋ',르:'ㅋ',키:'ㅋ',오:'ㅇ',으:'ㅇ',우:'ㅇ',요:'ㅇ',로:'ㅇ',드:'ㄷ',디:'ㄷ'};
 export function normalizeAuthor(text){
- const compact=cleanLabel(text).replace(/[|丨\-‐‑–—/]/g,'').replace(/[©○●∘◦®]/g,'ㅇ').replace(/[≡≣]/g,'ㅋ');
- const tailed=AUTHOR_TAIL[compact.slice(-1)]?compact.slice(0,-1)+AUTHOR_TAIL[compact.slice(-1)]:compact;
+ const compact=cleanLabel(text).replace(/[|丨\-‐‑–—/'"`.,·ㆍ]/g,'').replace(/[©○●∘◦®]/g,'ㅇ').replace(/[≡≣]/g,'ㅋ');
+ const circledEnd=/^([가-힣]{1,3}\d{1,4})[ㄱ-ㅎ]?ㅇ$/.test(compact)?compact.replace(/[ㄱ-ㅎ]?ㅇ$/,'ㅇ'):compact;
+ const tailed=AUTHOR_TAIL[circledEnd.slice(-1)]?circledEnd.slice(0,-1)+AUTHOR_TAIL[circledEnd.slice(-1)]:circledEnd;
  const circled=/^[가-힣]{1,3}\d{1,4}[oO]$/.test(tailed)?`${tailed.slice(0,-1)}ㅇ`:tailed;
  const closed=/^[0Oo]\d{3,}3$/.test(circled)?`${circled.slice(0,-1)}ㅋ`:circled;
  const embedded=circled.match(/[가-힣]{1,3}\d{1,4}(?:[ㄱ-ㅎㅏ-ㅣ]\d{0,3})?/);
  return finishAuthor(circled)||finishAuthor(compact.replace(/=+$/,'ㅋ'))||finishAuthor(closed)||(embedded?finishAuthor(embedded[0]):'');
 }
+function classDiff(a,b){
+ const n=Math.min(a.length,b.length);let d=Math.abs(a.length-b.length);
+ for(let i=0;i<n;i++)if(a[i]!==b[i])d++;
+ return d;
+}
 export function snapShelfClasses(books){
  const vals=books.map(b=>b.classification).filter(isFullClass);
  if(vals.length<3)return books;
- const counts=new Map();
- for(const v of vals)counts.set(v,(counts.get(v)||0)+1);
- let mode='',best=0;
- for(const [v,n] of counts)if(n>best){mode=v;best=n;}
- if(best<Math.max(3,Math.ceil(vals.length*.4)))return books;
+ const short=vals.filter(v=>/^\d{3}\.\d$/.test(v));
+ const pool=short.length>=3?short:vals;
+ const width=Math.max(...pool.map(v=>v.length));
+ let mode='';
+ for(let i=0;i<width;i++){
+  const counts=new Map();
+  for(const v of pool)if(i<v.length)counts.set(v[i],(counts.get(v[i])||0)+1);
+  let ch='',n=0;for(const [c,k] of counts)if(k>n){ch=c;n=k;}
+  mode+=ch;
+ }
+ if(!isFullClass(mode))mode=pool.sort((a,b)=>pool.filter(v=>v===b).length-pool.filter(v=>v===a).length)[0]||'';
+ if(!isFullClass(mode))return books;
  return books.map(b=>{
   const c=b.classification;
-  if(!c||c===mode||!isFullClass(c)||c.length!==mode.length)return b;
-  let diff=0;for(let i=0;i<c.length;i++)if(c[i]!==mode[i])diff++;
-  return diff<=2?{...b,classification:mode}:b;
+  if(!c||c===mode)return b;
+  if(!isFullClass(c)||classDiff(c,mode)<=2)return {...b,classification:mode};
+  return b;
+ });
+}
+export function snapShelfAuthors(books){
+ const authors=books.map(b=>b.author).filter(isAuthor);
+ if(authors.length<3)return books;
+ const counts=new Map();
+ for(const a of authors){const s=a.match(/^[가-힣]{1,3}/)[0];counts.set(s,(counts.get(s)||0)+1);}
+ let mode='',best=0;for(const [s,n] of counts)if(n>best){mode=s;best=n;}
+ if(best<Math.max(3,Math.ceil(authors.length*.4)))return books;
+ return books.map(b=>{
+  const a=b.author||'';
+  if(isAuthor(a)&&a.startsWith(mode))return b;
+  const rest=a.match(/\d{1,4}(?:[ㄱ-ㅎㅏ-ㅣ]\d{0,3})?/);
+  if(rest&&isAuthor(mode+rest[0]))return {...b,author:mode+rest[0]};
+  return b;
  });
 }
 // A round cutter mark is often read as © or a trailing 6. Keep it as ㅇ when the glyph is a circle.

@@ -1,4 +1,4 @@
-import {readLabels,cleanLabel,normalizeAuthor,parseShelfText,interpretCallNumber,circleAuthor,preferClass as pickClass,isFullClass,isCollectionBadge,snapShelfClasses} from './labels.mjs';
+import {readLabels,cleanLabel,normalizeAuthor,parseShelfText,interpretCallNumber,circleAuthor,preferClass as pickClass,preferAuthor,isFullClass,isCollectionBadge,snapShelfClasses,snapShelfAuthors} from './labels.mjs';
 
 const DIGIT_WHITELIST='0123456789.';
 const JAMO=Array.from({length:0x3163-0x3131+1},(_,i)=>String.fromCharCode(0x3131+i)).join('');
@@ -7,10 +7,13 @@ const AUTHOR_WHITELIST=`0123456789가김나박이정최조한신슈스원${JAMO}
 function preferFields(primary,extra){
  return {
   classification:pickClass(primary.classification,extra.classification)||primary.classification||'',
-  author:primary.author||extra.author||'',
+  author:preferAuthor(primary.author,extra.author)||primary.author||extra.author||'',
   volume:primary.volume||extra.volume||'',
   copy:primary.copy||extra.copy||''
  };
+}
+function asAuthor(fields){
+ return {classification:'',author:fields.author||'',volume:fields.volume||'',copy:fields.copy||''};
 }
 
 function reconcileClass(a,b){
@@ -42,7 +45,7 @@ function mergeShelf(scene,strips){
  items.sort((a,b)=>a.bbox[0]-b.bbox[0]);
  const kept=items.flatMap(s=>{const ok=/^\d{3}(?:\.\d{1,4})?$/.test(s.classification);if(!ok&&!s.author)return [];return [{...s,classification:ok?s.classification:'',uncertain:s.uncertain||!ok}];});
  if(kept.length<2)return [];
- return snapShelfClasses(kept).map((s,i)=>({id:`V${String(i+1).padStart(2,'0')}`,classification:s.classification,author:s.author||'',volume:s.volume||'',copy:s.copy||'',bbox:s.bbox.map(Math.round),labelBox:s.bbox.map(Math.round),confidence:s.confidence||0,confirmed:false,uncertain:!!s.uncertain}));
+ return snapShelfAuthors(snapShelfClasses(kept)).map((s,i)=>({id:`V${String(i+1).padStart(2,'0')}`,classification:s.classification,author:s.author||'',volume:s.volume||'',copy:s.copy||'',bbox:s.bbox.map(Math.round),labelBox:s.bbox.map(Math.round),confidence:s.confidence||0,confirmed:false,uncertain:!!s.uncertain||!isFullClass(s.classification)||!s.author}));
 }
 
 async function recognizeShelf(engine,prepare,width,height,isCurrent){
@@ -74,53 +77,55 @@ async function recognizeShelf(engine,prepare,width,height,isCurrent){
    if(!image||!isCurrent())return;
    const fields=await readLine(image,whitelist,psm);
    if(kind==='class'){if(fields.classification)parsed=preferFields(parsed,{classification:fields.classification,author:'',volume:'',copy:''});}
-   else parsed=preferFields(parsed,fields);
+   else parsed=preferFields(parsed,asAuthor(fields));
   };
-  if(lines[0]){await take(lines[0],DIGIT_WHITELIST,'class');topWasClass=!!parsed.classification;}
-  if(lines[0]&&!isFullClass(parsed.classification))await take(gray[0],DIGIT_WHITELIST,'class');
-  if(lines[0]&&!isFullClass(parsed.classification))await take(lines[0],'','class');
+  if(lines[0]){await take(lines[0],'','class');topWasClass=!!parsed.classification;}
+  if(lines[0]&&!isFullClass(parsed.classification))await take(gray[0],'','class');
+  if(lines[0]&&!isFullClass(parsed.classification))await take(lines[0],DIGIT_WHITELIST,'class');
   if(lines[0]&&/^[17]\d{2}\.\d{1,4}$/.test(parsed.classification)){
    const open=await readLine(lines[0],'');
    if(/^00\d\.\d{1,4}$/.test(open.classification))parsed={...parsed,classification:open.classification};
   }
   if(!isCurrent())return [];
   if(lines[1]){
-   const authorLine=preferFields(await readLine(lines[1],''),await readLine(lines[1],AUTHOR_WHITELIST));
+   const authorLine=preferFields(asAuthor(await readLine(lines[1],'')),asAuthor(await readLine(lines[1],AUTHOR_WHITELIST)));
    topAuthor=authorLine.author;
-   parsed=preferFields(parsed,authorLine);
+   parsed=preferFields(parsed,asAuthor(authorLine));
    const circled=circleAuthor(authorLine.author);
    if(circled)parsed.author=circled;
   }
   if(!parsed.author)await take(gray[1],'','author');
-  if(!parsed.author)await take(gray[1],AUTHOR_WHITELIST,'author');
   if(!parsed.author)await take(invert[1],'','author');
   if(!parsed.author)await take(lines[1],'','author','8');
-  for(let i=2;i<lines.length;i++)parsed=preferFields(parsed,await readLine(lines[i],''));
+  const VOL_WL='0123456789.vVcC권 ';
+  for(let i=2;i<Math.max(lines.length,gray.length);i++){
+   parsed=preferFields(parsed,asAuthor(await readLine(lines[i],'')));
+   parsed=preferFields(parsed,asAuthor(await readLine(gray[i],VOL_WL)));
+  }
   if(!parsed.author&&topAuthor&&!topWasClass)parsed=preferFields(parsed,{classification:'',author:topAuthor,volume:'',copy:''});
   if(lines[0]&&!parsed.author&&!topWasClass){
    if(!isCurrent())return [];
-   parsed=preferFields(parsed,await readLine(lines[0],AUTHOR_WHITELIST));
+   parsed=preferFields(parsed,asAuthor(await readLine(lines[0],AUTHOR_WHITELIST)));
   }
   if(lines[1]&&!isFullClass(parsed.classification)){
    if(!isCurrent())return [];
    parsed=preferFields(parsed,await readLine(lines[1],DIGIT_WHITELIST));
   }
-  if(!isFullClass(parsed.classification)||!parsed.author||/6$/.test(parsed.author)){
-   if(!isCurrent())return [];
-   await engine.setParameters({tessedit_pageseg_mode:'6',tessedit_char_whitelist:''});
-   const {data}=await engine.recognize(strip.image);
-   confidence=data.confidence||0;
-   parsed=preferFields(parsed,interpretCallNumber(data.text||''));
-   const circled=circleAuthor(data.text||'');
-   if(circled&&(!parsed.author||parsed.author===circled.replace(/ㅇ$/,'6')||parsed.author===circled.slice(0,-1)))parsed.author=circled;
-   const local=words.filter(w=>w.bbox&&(w.bbox.x0+w.bbox.x1)/2>=strip.bbox[0]&&(w.bbox.x0+w.bbox.x1)/2<=strip.bbox[2]).sort((a,b)=>a.bbox.y0-b.bbox.y0||a.bbox.x0-b.bbox.x0).map(w=>w.text).join(' ');
-   const fromBand=parseShelfText(local);
-   if(!isFullClass(parsed.classification)&&isFullClass(fromBand.classification))parsed.classification=fromBand.classification;
-   else parsed.classification=pickClass(parsed.classification,fromBand.classification)||parsed.classification;
-   if(!parsed.author&&fromBand.author)parsed.author=fromBand.author;
-   if(!parsed.volume&&fromBand.volume)parsed.volume=fromBand.volume;
-   if(!parsed.copy&&fromBand.copy)parsed.copy=fromBand.copy;
-  }
+  if(!isCurrent())return [];
+  await engine.setParameters({tessedit_pageseg_mode:'6',tessedit_char_whitelist:''});
+  const {data}=await engine.recognize(strip.image);
+  confidence=data.confidence||0;
+  const whole=interpretCallNumber(data.text||'');
+  parsed=preferFields(parsed,whole);
+  const circled=circleAuthor(data.text||'');
+  if(circled)parsed.author=preferAuthor(parsed.author,circled)||circled;
+  const local=words.filter(w=>w.bbox&&(w.bbox.x0+w.bbox.x1)/2>=strip.bbox[0]&&(w.bbox.x0+w.bbox.x1)/2<=strip.bbox[2]).sort((a,b)=>a.bbox.y0-b.bbox.y0||a.bbox.x0-b.bbox.x0).map(w=>w.text).join(' ');
+  const fromBand=parseShelfText(local);
+  if(!isFullClass(parsed.classification)&&isFullClass(fromBand.classification))parsed.classification=fromBand.classification;
+  else parsed.classification=pickClass(parsed.classification,fromBand.classification)||parsed.classification;
+  if(!parsed.author&&fromBand.author)parsed.author=fromBand.author;
+  if(!parsed.volume&&fromBand.volume)parsed.volume=fromBand.volume;
+  if(!parsed.copy&&fromBand.copy)parsed.copy=fromBand.copy;
   strips.push({classification:parsed.classification,author:parsed.author,volume:parsed.volume||'',copy:parsed.copy||'',uncertain:!isFullClass(parsed.classification)||!parsed.author,bbox:strip.bbox,confidence});
  }
  return mergeShelf(books,strips);
@@ -142,7 +147,7 @@ export async function recognizeLabels(engine,encoded,width,height,isCurrent=()=>
    const box=book.labelBox||book.bbox,cx=(box[0]+box[2])/2;
    const hit=shelf.find(s=>cx>=s.bbox[0]&&cx<=s.bbox[2]);
    if(!hit)continue;
-   hit.classification=pickClass(hit.classification,book.classification)||hit.classification;
+   if(!isFullClass(hit.classification))hit.classification=pickClass(hit.classification,book.classification)||hit.classification||book.classification||'';
    if(!hit.author&&book.author)hit.author=book.author;
    if(!hit.volume&&book.volume)hit.volume=book.volume;
    if(!hit.copy&&book.copy)hit.copy=book.copy;
