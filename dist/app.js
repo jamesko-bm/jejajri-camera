@@ -48,7 +48,7 @@ function paintBoxes(ctx,width,height,books){
 function canvasesFromSource(source){
  const w=source.videoWidth||source.naturalWidth||source.width,h=source.videoHeight||source.naturalHeight||source.height;
  const native=document.createElement('canvas');native.width=w;native.height=h;native.getContext('2d').drawImage(source,0,0,w,h);
- const scale=Math.min(1,2000/Math.max(w,h));
+ const scale=Math.min(1,2400/Math.max(w,h));
  const snap=document.createElement('canvas');snap.width=Math.max(1,Math.round(w*scale));snap.height=Math.max(1,Math.round(h*scale));
  snap.getContext('2d',{willReadFrequently:true}).drawImage(source,0,0,snap.width,snap.height);
  return {native,snapshot:snap};
@@ -81,7 +81,7 @@ function loadOCR(){
  if(window.Tesseract)return Promise.resolve();
  return new Promise((resolve,reject)=>{const old=document.getElementById('ocr-script');old?.remove();const script=document.createElement('script');script.id='ocr-script';script.src='https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';script.onload=resolve;script.onerror=()=>reject(Error('OCR 다운로드를 확인해 주세요.'));document.head.append(script);});
 }
-function withTimeout(promise,ms=120000){let timer;return Promise.race([promise,new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('OCR 응답을 기다리고 있습니다. 인터넷 연결을 확인해 주세요.')),ms);})]).finally(()=>clearTimeout(timer));}
+function withTimeout(promise,ms=180000){let timer;return Promise.race([promise,new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('OCR 응답을 기다리고 있습니다. 인터넷 연결을 확인해 주세요.')),ms);})]).finally(()=>clearTimeout(timer));}
 async function getWorker(){
  if(worker)return worker;
  if(workerPromise)return workerPromise;

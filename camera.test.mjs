@@ -40,20 +40,21 @@ test('blurred author digits that start with 0 are read as 이',()=>{
  assert.equal(repairClass('4945.19'),'');
  assert.equal(parseShelfText('UUs. 10 ol211=').classification,'');
  assert.equal(normalizeAuthor('004.59'),'');
- assert.deepEqual(parseShelfText('04.59 0164ㄷ'),{classification:'004.59',author:'이64ㄷ'});
- assert.deepEqual(parseShelfText('004 .59 김94ㄱ2'),{classification:'004.59',author:'김94ㄱ2'});
- assert.deepEqual(parseShelfText('004.59 0164ㄷ'),{classification:'004.59',author:'이64ㄷ'});
- assert.deepEqual(parseShelfText('004.59 김94ㄱ2'),{classification:'004.59',author:'김94ㄱ2'});
+ assert.deepEqual(parseShelfText('04.59 0164ㄷ'),{classification:'004.59',author:'이64ㄷ',volume:''});
+ assert.deepEqual(parseShelfText('004 .59 김94ㄱ2'),{classification:'004.59',author:'김94ㄱ2',volume:''});
+ assert.deepEqual(parseShelfText('004.59 0164ㄷ'),{classification:'004.59',author:'이64ㄷ',volume:''});
+ assert.deepEqual(parseShelfText('004.59 김94ㄱ2'),{classification:'004.59',author:'김94ㄱ2',volume:''});
  assert.equal(parseShelfText('0064.59 Bais').classification,'');
  assert.equal(repairClass('05.13'),'005.13');
- assert.deepEqual(interpretCallNumber('005.13','이211ㅋ'),{classification:'005.13',author:'이211ㅋ'});
- assert.deepEqual(interpretCallNumber('004.73','진91ㅋ'),{classification:'004.73',author:'진91ㅋ'});
- assert.deepEqual(interpretCallNumber('004.59','김94ㄱ2'),{classification:'004.59',author:'김94ㄱ2'});
- assert.deepEqual(interpretCallNumber('김94ㄱ2','004.59'),{classification:'004.59',author:'김94ㄱ2'});
- assert.deepEqual(interpretCallNumber('1004.59','1이64ㄷㄷ'),{classification:'004.59',author:'이64ㄷ'});
- assert.deepEqual(interpretCallNumber('05.13\n이211ㅋ'),{classification:'005.13',author:'이211ㅋ'});
- assert.deepEqual(interpretCallNumber('04.59','0164ㄷ'),{classification:'004.59',author:'이64ㄷ'});
- assert.deepEqual(interpretCallNumber('4945.19','012113'),{classification:'',author:'이211ㅋ'});
+ const call=(c,a,v='')=>({classification:c,author:a,volume:v});
+ assert.deepEqual(interpretCallNumber('005.13','이211ㅋ'),call('005.13','이211ㅋ'));
+ assert.deepEqual(interpretCallNumber('004.73','진91ㅋ'),call('004.73','진91ㅋ'));
+ assert.deepEqual(interpretCallNumber('004.59','김94ㄱ2'),call('004.59','김94ㄱ2'));
+ assert.deepEqual(interpretCallNumber('김94ㄱ2','004.59'),call('004.59','김94ㄱ2'));
+ assert.deepEqual(interpretCallNumber('1004.59','1이64ㄷㄷ'),call('004.59','이64ㄷ'));
+ assert.deepEqual(interpretCallNumber('05.13\n이211ㅋ'),call('005.13','이211ㅋ'));
+ assert.deepEqual(interpretCallNumber('04.59','0164ㄷ'),call('004.59','이64ㄷ'));
+ assert.deepEqual(interpretCallNumber('4945.19','012113'),call('','이211ㅋ'));
  assert.equal(readLabels([word('004.59',20,100),word('0164ㄷ',20,125),word('004.73',180,100),word('진91ㅋ',180,125)],400,300)[0].author,'이64ㄷ');
 });
 test('real label format: jamo, split tokens, decimals and badges',()=>{
@@ -68,6 +69,23 @@ test('000 with an author is a real label; unsupported numeric badges alone are n
  assert.deepEqual(readLabels([word('000',20,100),word('000',150,100)],300,250),[]);
  const books=readLabels([word('000',20,100),word('김1ㄱ',20,125),word('001',150,100),word('박2ㅎ',150,125)],300,250);
  assert.equal(books[0].classification,'000');assert.equal(decreasingBooks(books).complete,true);
+});
+test('children shelf labels: 598.1, one-decimal class, yellow 500 badge, hyphen author, copy',()=>{
+ const call=(c,a,v='')=>({classification:c,author:a,volume:v});
+ assert.equal(repairClass('598.1'),'598.1');
+ assert.equal(repairClass('00459'),'004.59');
+ assert.equal(repairClass('5981'),'598.1');
+ assert.equal(normalizeAuthor('이39-'),'이39');
+ assert.equal(normalizeAuthor('슈38ㅋ'),'슈38ㅋ');
+ assert.deepEqual(interpretCallNumber('598.1','슈38ㅋ'),call('598.1','슈38ㅋ'));
+ assert.deepEqual(interpretCallNumber('598.1','이39-','c.2'),call('598.1','이39','2'));
+ assert.deepEqual(interpretCallNumber('500','598.1','슈38ㅋ'),call('598.1','슈38ㅋ'));
+ assert.deepEqual(interpretCallNumber('500\n슈38ㅋ'),call('500','슈38ㅋ'));
+ const words=[word('598.1',20,100,40,16),word('이67ㄷ',20,122,40,16),word('500',20,150,40,18),word('598.1',120,100,40,16),word('이31ㄱ',120,122,40,16),word('500',120,150,40,18)];
+ const books=readLabels(words,300,250);
+ assert.deepEqual(books.map(b=>b.classification),['598.1','598.1']);
+ assert.deepEqual(books.map(b=>b.author),['이67ㄷ','이31ㄱ']);
+ assert.equal(decreasingBooks(books).flagged[0].author,'이67ㄷ');
 });
 test('same class compares full jamo author, including numeric suffix',()=>{
  assert.equal(decreasingBooks([book('004.59','a','김94ㅎ'),book('004.59','b','김94ㄱ2')]).flagged[0].id,'a');

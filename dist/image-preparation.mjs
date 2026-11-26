@@ -43,24 +43,33 @@ function blank(makeCanvas,width,height){const canvas=makeCanvas();canvas.width=M
 function labelBand(data,width,height){
  const rows=[];
  for(let y=0;y<height;y++){
-  let white=0,blue=0,pink=0,edge=0,n=0;
+  let white=0,blue=0,pink=0,yellow=0,edge=0,n=0;
   for(let x=1;x<width;x+=2){
    const i=(y*width+x)*4,p=(y*width+x-1)*4,r=data[i],g=data[i+1],b=data[i+2],v=(r+g+b)/3;
    n++;
    if(v>185&&Math.max(r,g,b)-Math.min(r,g,b)<40)white++;
    if(b>80&&b>r+25&&b>g+8)blue++;
    if(r>150&&r>g+30&&r>b+15)pink++;
+   if(r>185&&g>150&&b<125&&r>b+50&&g>b+25)yellow++;
    if(Math.abs(r-data[p])+Math.abs(g-data[p+1])+Math.abs(b-data[p+2])>80)edge++;
   }
-  rows.push({white:white/n,blue:blue/n,pink:pink/n,edge:edge/n});
+  rows.push({white:white/n,blue:blue/n,pink:pink/n,yellow:yellow/n,edge:edge/n});
  }
- let bluePeak=0,blueAt=height;
- for(let y=0;y<height;y++)if(rows[y].blue>bluePeak){bluePeak=rows[y].blue;blueAt=y;}
- const searchBottom=bluePeak>0.12?Math.max(12,blueAt-8):Math.round(height*.78);
- const searchTop=Math.round(height*.22);
+ let bluePeak=0,blueAt=height,yellowPeak=0,yellowTop=height;
+ for(let y=0;y<height;y++){
+  if(rows[y].blue>bluePeak){bluePeak=rows[y].blue;blueAt=y;}
+  if(rows[y].yellow>yellowPeak)yellowPeak=rows[y].yellow;
+ }
+ if(yellowPeak>0.10){
+  for(let y=0;y<height;y++)if(rows[y].yellow>yellowPeak*0.42){yellowTop=y;break;}
+ }
+ const badge=yellowPeak>0.10?yellowTop:bluePeak>0.12?blueAt:0;
+ const searchBottom=badge?Math.max(16,badge-Math.max(4,Math.round(height*0.008))):Math.round(height*.92);
+ const searchTop=badge?Math.max(0,badge-Math.max(64,Math.round(height*0.18))):Math.round(height*.28);
  let peak=0,at=Math.round((searchTop+searchBottom)/2);
- for(let y=searchTop;y<searchBottom;y++)if(rows[y].white>0.25&&rows[y].pink<0.08&&rows[y].edge>peak){peak=rows[y].edge;at=y;}
- return [Math.max(0,at-38),Math.min(searchBottom,at+42)];
+ for(let y=searchTop;y<searchBottom;y++)if(rows[y].white>0.22&&rows[y].pink<0.08&&rows[y].edge>peak){peak=rows[y].edge;at=y;}
+ const pad=Math.max(36,Math.round(height*0.045));
+ return [Math.max(0,at-pad),Math.min(searchBottom,at+pad+6)];
 }
 
 function shelfSpans(data,width,y0,y1){
@@ -85,7 +94,7 @@ function shelfSpans(data,width,y0,y1){
  for(const x of gaps){const last=centers[centers.length-1];if(!last||x-last.at>14)centers.push({at:x,dark:smooth[x]});else if(smooth[x]<last.dark)last.at=x,last.dark=smooth[x];}
  const bounds=[left,...centers.map(g=>g.at),right];
  const spans=[];
- for(let i=0;i<bounds.length-1;i++)if(bounds[i+1]-bounds[i]>=26)spans.push([bounds[i],bounds[i+1]]);
+ for(let i=0;i<bounds.length-1;i++)if(bounds[i+1]-bounds[i]>=Math.max(16,Math.round(width*0.01)))spans.push([bounds[i],bounds[i+1]]);
  return spans;
 }
 
@@ -174,7 +183,8 @@ function adaptiveTrim(source,x0,y0,x1,y1,makeCanvas){
   return line.toDataURL('image/png');
  });
  const grayLines=chosen.map(([a,b])=>lineAt(a,b,(x,y)=>photo[y*width+x]));
- return {image:url,lines,grayLines};
+ const invertLines=chosen.map(([a,b])=>lineAt(a,b,(x,y)=>255-photo[y*width+x]));
+ return {image:url,lines,grayLines,invertLines};
 }
 
 // Separate each spine at the shadow between books, then flatten uneven light.
@@ -199,7 +209,7 @@ export function analyzeShelf(source,makeCanvas=()=>document.createElement('canva
  const strips=[];
  for(const [x0,x1] of spans){
   const trimmed=adaptiveTrim(source,x0,y0,x1,y1,makeCanvas);
-  if(trimmed?.image)strips.push({image:trimmed.image,lines:trimmed.lines||[],grayLines:trimmed.grayLines||[],bbox:[x0,y0,x1,y1]});
+  if(trimmed?.image)strips.push({image:trimmed.image,lines:trimmed.lines||[],grayLines:trimmed.grayLines||[],invertLines:trimmed.invertLines||[],bbox:[x0,y0,x1,y1]});
  }
  return {band:{image:band.toDataURL('image/png'),mapWord:word=>({...word,bbox:{x0:word.bbox.x0/scale+x0,x1:word.bbox.x1/scale+x0,y0:word.bbox.y0/scale+y0,y1:word.bbox.y1/scale+y0}})},strips};
 }
