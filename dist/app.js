@@ -31,13 +31,18 @@ function setView(next){
  showProcessing(next==='processing');
 }
 function paintBoxes(ctx,width,height,books){
- const flagged=new Set(decreasingBooks(books).flagged),weight=Math.max(6,Math.round(width/140));
- ctx.lineWidth=weight;ctx.strokeStyle='#ffe000';ctx.fillStyle='rgba(255,224,0,.16)';
+ const flagged=new Set(decreasingBooks(books).flagged);
+ ctx.strokeStyle='#ffe000';ctx.fillStyle='rgba(255,224,0,.12)';
  for(const book of books){
   if(!flagged.has(book))continue;
-  const [x,y,r,b]=book.bbox||book.labelBox,pad=Math.max(6,Math.round(Math.max(r-x,b-y)*.06));
-  const left=Math.max(0,x-pad),top=Math.max(0,y-pad),right=Math.min(width,r+pad),bottom=Math.min(height,b+pad);
-  ctx.fillRect(left,top,right-left,bottom-top);ctx.strokeRect(left,top,right-left,bottom-top);
+  const [x,y,r,b]=book.bbox||book.labelBox;
+  const left=Math.max(0,x),top=Math.max(0,y),right=Math.min(width,r),bottom=Math.min(height,b);
+  const bw=Math.max(1,right-left),bh=Math.max(1,bottom-top);
+  const weight=Math.max(3,Math.round(Math.min(bw,bh)/16));
+  ctx.lineWidth=weight;
+  const inset=weight/2;
+  ctx.fillRect(left,top,bw,bh);
+  ctx.strokeRect(left+inset,top+inset,Math.max(1,bw-weight),Math.max(1,bh-weight));
  }
 }
 function canvasesFromSource(source){

@@ -88,7 +88,32 @@ test('a captured frame can be interpreted while the camera moves',()=>{const gat
 test('incomplete OCR retries automatically; slow cumulative motion invalidates',()=>{const gate=new RecognitionGate({threshold:5});const a=Uint8Array.from([20,50,100,160]);gate.tick(a,0);gate.tick(a,1100);gate.finish(gate.begin(),false,1200);assert.equal(gate.tick(a,3000).ready,false);assert.equal(gate.tick(a,4300).ready,true);gate.finish(gate.begin(),true,4400);for(let i=1;i<=8;i++)gate.tick(Uint8Array.from([20+i,50+i,100-i,160-i]),4500+i*180);assert.equal(gate.done,false);});
 test('uniform exposure change and slight noise do not count as motion',()=>{assert.equal(frameDifference([20,50,80],[30,60,90]),0);assert.ok(frameDifference([20,50,80],[21,49,80])<1);});
 test('visibility reset waits for in-flight OCR and never accepts its stale result',()=>{const gate=new RecognitionGate();const sig=[10,30,80];gate.tick(sig,0);gate.tick(sig,1100);const token=gate.begin();gate.reset();gate.tick(sig,2000);assert.equal(gate.tick(sig,3100).ready,false);assert.equal(gate.finish(token,true,3200),false);assert.equal(gate.tick(sig,3300).ready,true);});
-test('camera candidates and image edge refinement retain bounds',()=>{const w=(text,x,y)=>({text,confidence:90,bbox:{x0:x,y0:y,x1:x+25,y1:y+15}});const rows=cameraCandidates([w('400',10,100),w('김10',10,125),w('300',100,100),w('박2',100,125)],200,200);assert.equal(rows.length,2);assert.equal(decreasingBooks(rows).flagged.length,1);const image={width:200,height:200,data:new Uint8ClampedArray(200*200*4)};const refined=refineBookEdges(rows,image);assert.equal(refined[0].bbox[0],0);assert.equal(refined[1].bbox[2],200);assert.ok(refined[0].bbox[2]<=refined[1].bbox[0]);assert.deepEqual(cameraCandidates([],200,200),[]);});
+test('camera candidates and image edge refinement retain bounds',()=>{
+ const w=(text,x,y)=>({text,confidence:90,bbox:{x0:x,y0:y,x1:x+25,y1:y+15}});
+ const rows=cameraCandidates([w('400',10,100),w('김10',10,125),w('300',100,100),w('박2',100,125)],200,200);
+ assert.equal(rows.length,2);assert.equal(decreasingBooks(rows).flagged.length,1);
+ const image={width:200,height:200,data:new Uint8ClampedArray(200*200*4)};
+ const refined=refineBookEdges(rows,image);
+ assert.ok(refined[0].bbox[2]<=refined[1].bbox[0]);
+ assert.ok(refined[0].bbox[2]-refined[0].bbox[0]<160);
+ assert.ok(refined[0].bbox[0]>=0&&refined[1].bbox[2]<=200);
+ assert.deepEqual(cameraCandidates([],200,200),[]);
+});
+test('yellow boxes follow the painted book rectangle, not just the label',()=>{
+ const width=200,height=180,image={width,height,data:new Uint8ClampedArray(width*height*4)};
+ const fill=(x,y,r,b,rgb)=>{for(let yy=y;yy<b;yy++)for(let xx=x;xx<r;xx++){const i=(yy*width+xx)*4;image.data[i]=rgb[0];image.data[i+1]=rgb[1];image.data[i+2]=rgb[2];image.data[i+3]=255;}};
+ fill(30,20,80,160,[180,70,50]);fill(86,25,140,160,[50,90,170]);
+ const books=[
+  {id:'a',classification:'400',author:'김10',volume:'1',bbox:[40,90,70,120],labelBox:[40,90,70,120]},
+  {id:'b',classification:'300',author:'박2',volume:'1',bbox:[100,95,130,125],labelBox:[100,95,130,125]},
+ ];
+ const refined=refineBookEdges(books,image),[x,y,r,d]=refined[0].bbox,second=refined[1].bbox;
+ assert.ok(x<=33&&r>=77,String(refined[0].bbox));
+ assert.ok(y<=26&&d>=154,String(refined[0].bbox));
+ assert.ok(second[0]<=90&&second[2]>=136,String(second));
+ assert.ok(second[1]<=30&&second[3]>=154,String(second));
+ assert.ok(refined[0].bbox[2]<=refined[1].bbox[0]+2);
+});
 test('start offers image add and camera, then process with a blinking status and yellow book borders',()=>{
  const html=readFileSync(new URL('./dist/index.html',import.meta.url),'utf8'),app=readFileSync(new URL('./dist/app.js',import.meta.url),'utf8');
  assert.match(html,/id=["']add-images"/);assert.match(html,/>이미지 추가</);
