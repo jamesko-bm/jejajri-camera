@@ -68,21 +68,25 @@ function labelBand(data,width,height){
  for(let y=lo;y<height;y++)if(rows[y].yellow>yellowPeak)yellowPeak=rows[y].yellow;
  for(let y=lo;y<height;y++)if(rows[y].yellow>yellowPeak*0.45)yellowAt=y;
  if(yellowPeak>0.08){
+  let coreTop=yellowAt,coreBot=yellowAt;
+  while(coreTop>0&&rows[coreTop].yellow>yellowPeak*0.45)coreTop--;
+  while(coreBot<height-1&&rows[coreBot].yellow>yellowPeak*0.45)coreBot++;
+  const badgeH=Math.max(12,coreBot-coreTop);
+  const maxBadge=Math.max(badgeH,Math.round(height*0.09));
   let top=yellowAt,bottom=yellowAt;
-  while(top>0&&rows[top].yellow>yellowPeak*0.32)top--;
-  while(bottom<height-1&&rows[bottom].yellow>yellowPeak*0.32)bottom++;
-  const badgeH=Math.max(10,bottom-top);
-  const labelH=Math.max(badgeH*1.75,Math.round(height*0.07),48);
-  return [Math.max(0,top-labelH),top];
+  while(top>0&&rows[top].yellow>yellowPeak*0.32&&yellowAt-top<maxBadge)top--;
+  while(bottom<height-1&&rows[bottom].yellow>yellowPeak*0.32&&bottom-yellowAt<maxBadge)bottom++;
+  const labelH=Math.max(Math.round(badgeH*1.35),40);
+  return {label:[Math.max(0,top-labelH),top],yellow:[coreTop,coreBot]};
  }
  let first=-1,last=0;
  for(let y=0;y<height;y++)if(rows[y].paper>Math.max(0.2,paperPeak*0.35)){if(first<0)first=y;last=y;}
- if(paperPeak>0.25&&first>=0&&last-first>10)return [first,Math.min(height,last+1)];
+ if(paperPeak>0.25&&first>=0&&last-first>10)return {label:[first,Math.min(height,last+1)],yellow:null};
  const searchBottom=Math.round(height*.95),searchTop=Math.round(height*.18);
  let peak=0,at=Math.round((searchTop+searchBottom)/2);
  for(let y=searchTop;y<searchBottom;y++)if(rows[y].paper>0.18&&rows[y].pink<0.08&&rows[y].paper>=peak){peak=rows[y].paper;at=y;}
  const pad=Math.max(28,Math.round(height*0.06));
- return [Math.max(0,at-pad),Math.min(searchBottom,at+pad+6)];
+ return {label:[Math.max(0,at-pad),Math.min(searchBottom,at+pad+6)],yellow:null};
 }
 
 function smooth1(raw){
@@ -130,21 +134,28 @@ function splitAtDips(spans,score){
  return out;
 }
 
-function splitWideSpans(spans,score,labelH){
+function spanTypical(spans,hint){
+ const hintW=Math.max(24,hint);
+ const plausible=spans.map(([a,b])=>b-a).filter(w=>w>=hintW*0.5&&w<=hintW*2.4).sort((a,b)=>a-b);
+ return plausible.length>=3?plausible[Math.floor(plausible.length*0.4)]:hintW;
+}
+function splitWideSpans(spans,score,hint){
  if(!spans.length)return spans;
- const width=score.length;
- const expected=Math.max(36,Math.round(labelH*1.15));
- const cap=Math.max(expected*1.55,Math.round(width/16),48);
- const minW=Math.max(10,Math.round(expected*0.38));
+ const expected=spanTypical(spans,hint);
+ const cap=Math.max(expected*1.8,hint*1.6,40);
+ const minW=Math.max(8,Math.round(expected*0.32));
  let out=spans;
- for(let pass=0;pass<6;pass++){
+ for(let pass=0;pass<8;pass++){
   const next=[];
   let did=false;
   for(const [a,b] of out){
    if(b-a<=cap){next.push([a,b]);continue;}
    const lo=a+Math.max(minW,Math.round((b-a)*0.08)),hi=b-Math.max(minW,Math.round((b-a)*0.08));
-   let best=lo,bestV=1;
-   for(let x=lo;x<hi;x++)if(score[x]<=bestV){bestV=score[x];best=x;}
+   if(hi<=lo){next.push([a,b]);continue;}
+   let best=lo,bestV=1,sum=0,n=0;
+   for(let x=lo;x<hi;x++){const v=score[x];sum+=v;n++;if(v<=bestV){bestV=v;best=x;}}
+   const mean=sum/Math.max(1,n);
+   if(bestV>mean*0.88)best=Math.round((a+b)/2);
    if(best-a>=minW&&b-best>=minW){next.push([a,best],[best,b]);did=true;}
    else next.push([a,b]);
   }
@@ -156,7 +167,7 @@ function splitWideSpans(spans,score,labelH){
 
 function mergeBrokenStickers(spans,data,width,y0,y1){
  const {dark}=columnStats(data,width,y0,y1);
- const expected=Math.max(36,Math.round((y1-y0)*1.15));
+ const expected=Math.max(28,Math.round((y1-y0)*0.7));
  const side=(a,b)=>{
   const w=Math.max(1,b-a),t1=a+Math.round(w/3),t2=a+Math.round(2*w/3);
   let L=0,R=0;for(let x=a;x<t1;x++)L+=dark[x];for(let x=t2;x<b;x++)R+=dark[x];
@@ -173,14 +184,15 @@ function mergeBrokenStickers(spans,data,width,y0,y1){
  }
  return out;
 }
-function rejoinThin(spans,width,labelH){
+function rejoinThin(spans,width,typical,maxGap=6){
  if(spans.length<2)return spans;
- const expected=Math.max(36,Math.round(labelH*1.15));
+ const expected=Math.max(24,typical);
  const out=[];
  for(const [a,b] of spans){
   if(out.length){
    const prev=out[out.length-1],prevW=prev[1]-prev[0],w=b-a,combined=b-prev[0],gap=a-prev[1];
-   if(gap<=6&&combined<=expected*1.7&&(w<expected*0.55||prevW<expected*0.55)){prev[1]=b;continue;}
+   const close=gap>=0&&gap<=Math.max(maxGap,expected*0.08);
+   if(close&&combined<=expected*1.6&&(w<expected*0.5||prevW<expected*0.5)){prev[1]=b;continue;}
   }
   out.push([a,b]);
  }
@@ -192,7 +204,35 @@ function stickerSpans(data,width,y0,y1){
  if(max<0.12)return [];
  const on=Math.max(0.22,max*0.38),off=Math.max(0.1,on*0.55),minW=Math.max(8,Math.round(width*0.006));
  const h=Math.max(1,y1-y0);
- return rejoinThin(mergeBrokenStickers(splitWideSpans(splitAtDips(hysteresisRuns(score,width,on,off,minW),score),score,h),data,width,y0,y1),width,h);
+ const hint=Math.max(24,Math.round(h*0.7));
+ const seed=splitAtDips(hysteresisRuns(score,width,on,off,minW),score);
+ const typical=spanTypical(seed,hint);
+ return rejoinThin(mergeBrokenStickers(splitWideSpans(seed,score,hint),data,width,y0,y1),width,typical);
+}
+function yellowBadgeSpans(data,width,y0,y1){
+ const h=Math.max(1,y1-y0);
+ const raw=new Float64Array(width);
+ for(let x=0;x<width;x++){
+  let n=0;for(let y=y0;y<y1;y++){const i=(y*width+x)*4;if(isYellowInk(data[i],data[i+1],data[i+2]))n++;}
+  raw[x]=n/h;
+ }
+ const score=smooth1(raw);
+ const peak=Math.max(...score,0);
+ if(peak<0.15)return [];
+ const on=Math.max(0.14,peak*0.28),off=Math.max(0.06,on*0.4),minW=Math.max(5,Math.round(width*0.003));
+ const hint=Math.max(18,Math.round(h*1.05));
+ const seed=hysteresisRuns(score,width,on,off,minW);
+ const typical=spanTypical(seed,hint);
+ return rejoinThin(splitWideSpans(seed,score,hint),width,typical).filter(([a,b])=>b-a>=8);
+}
+function slotsFromBadges(badges,width){
+ if(!badges.length)return [];
+ const centers=badges.map(([a,b])=>(a+b)/2);
+ return badges.map((span,i)=>{
+  const left=i?Math.round((centers[i-1]+centers[i])/2):Math.max(0,span[0]-6);
+  const right=i+1<badges.length?Math.round((centers[i]+centers[i+1])/2):Math.min(width,span[1]+6);
+  return [left,Math.max(left+8,right)];
+ });
 }
 
 function shelfSpans(data,width,y0,y1){
@@ -221,8 +261,16 @@ function shelfSpans(data,width,y0,y1){
  return spans;
 }
 
+function rawStrip(source,x0,y0,x1,y1,makeCanvas){
+ const sw=Math.max(1,x1-x0),sh=Math.max(1,y1-y0),scale=Math.min(source.width>4000?2.4:3,Math.max(2,140/sh));
+ const canvas=blank(makeCanvas,sw*scale,sh*scale),ctx=canvas.getContext('2d');
+ ctx.fillStyle='white';ctx.fillRect(0,0,canvas.width,canvas.height);
+ ctx.drawImage(source,x0,y0,sw,sh,0,0,canvas.width,canvas.height);
+ const url=canvas.toDataURL('image/png');
+ return url.startsWith('data:image')?{image:url,lines:[],grayLines:[],invertLines:[]}:null;
+}
 function adaptiveTrim(source,x0,y0,x1,y1,makeCanvas){
- const sw=Math.max(1,x1-x0),sh=Math.max(1,y1-y0),scale=Math.min(4,Math.max(3,180/sh));
+ const sw=Math.max(1,x1-x0),sh=Math.max(1,y1-y0),scale=Math.min(source.width>4000?2.5:4,Math.max(2,160/sh));
  const canvas=blank(makeCanvas,sw*scale,sh*scale),ctx=canvas.getContext('2d',{willReadFrequently:true});
  ctx.drawImage(source,x0,y0,sw,sh,0,0,canvas.width,canvas.height);
  const image=ctx.getImageData(0,0,canvas.width,canvas.height),{data,width,height}=image,gray=new Uint8Array(width*height);
@@ -318,9 +366,11 @@ export function analyzeShelf(source,makeCanvas,detail=null){
  const probe=blank(makeCanvas,width,height),pctx=probe.getContext('2d',{willReadFrequently:true});
  pctx.drawImage(source,0,0,width,height);
  const {data}=pctx.getImageData(0,0,width,height);
- const [y0,y1]=labelBand(data,width,height);
+ const bandInfo=labelBand(data,width,height);
+ const [y0,y1]=bandInfo.label;
+ const badges=bandInfo.yellow?yellowBadgeSpans(data,width,bandInfo.yellow[0],bandInfo.yellow[1]):[];
  const stickers=stickerSpans(data,width,y0,y1),shadows=shelfSpans(data,width,y0,y1);
- const chosen=stickers.length>=3?stickers:shadows.length>=2?shadows:stickers;
+ const chosen=badges.length>=3?slotsFromBadges(badges,width):stickers.length>=3?stickers:shadows.length>=2?shadows:stickers;
  const spans=chosen.map(([a,b])=>[Math.max(0,a-2),Math.min(width,b+2)]);
  if(spans.length<2)return {band:null,strips:[]};
  const hi=detail&&detail.width>=source.width?detail:source,ratio=hi.width/width;
@@ -337,7 +387,8 @@ export function analyzeShelf(source,makeCanvas,detail=null){
  const strips=[];
  for(const [sx0,sx1] of spans){
   const trimmed=adaptiveTrim(hi,sx0*ratio,y0*ratio,sx1*ratio,y1*ratio,makeCanvas);
-  if(trimmed?.image)strips.push({image:trimmed.image,lines:trimmed.lines||[],grayLines:trimmed.grayLines||[],invertLines:trimmed.invertLines||[],bbox:[sx0,y0,sx1,y1]});
+  const keep=trimmed?.image?trimmed:rawStrip(hi,sx0*ratio,y0*ratio,sx1*ratio,y1*ratio,makeCanvas);
+  if(keep?.image)strips.push({image:keep.image,lines:keep.lines||[],grayLines:keep.grayLines||[],invertLines:keep.invertLines||[],bbox:[sx0,y0,sx1,y1]});
  }
  return {band:{image:band.toDataURL('image/png'),mapWord:word=>({...word,bbox:{x0:word.bbox.x0/scale+x0,x1:word.bbox.x1/scale+x0,y0:word.bbox.y0/scale+y0,y1:word.bbox.y1/scale+y0}})},strips};
 }

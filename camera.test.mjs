@@ -174,14 +174,27 @@ test('label band sits above the lower 500 badges, not upper yellow covers',()=>{
  const w=900,h=300,canvas=createCanvas(w,h),ctx=canvas.getContext('2d');
  ctx.fillStyle='#6e5a44';ctx.fillRect(0,0,w,h);
  ctx.fillStyle='#f0d24a';ctx.fillRect(0,20,w,110);
- ctx.fillStyle='#efbf00';ctx.fillRect(10,232,w-20,48);
  for(let i=0;i<10;i++){
   ctx.fillStyle='#f4f4f4';ctx.fillRect(18+i*86,168,78,62);
   ctx.fillStyle='#222';ctx.fillRect(28+i*86,180,50,12);ctx.fillRect(28+i*86,198,40,12);
+  ctx.fillStyle='#efbf00';ctx.fillRect(20+i*86,232,74,46);
  }
  const shelf=analyzeShelf(canvas,()=>createCanvas(1,1));
- assert.ok(shelf.strips.length>=8,String(shelf.strips.length)+JSON.stringify(shelf.strips.map(s=>s.bbox)));
+ assert.equal(shelf.strips.length,10,String(shelf.strips.length)+JSON.stringify(shelf.strips.map(s=>s.bbox)));
  assert.ok(shelf.strips[0].bbox[1]>=120,String(shelf.strips[0].bbox));
+});
+test('each yellow 500 badge is one book on a packed 22-book shelf',()=>{
+ const w=2200,h=280,n=22,canvas=createCanvas(w,h),ctx=canvas.getContext('2d');
+ ctx.fillStyle='#6e5a44';ctx.fillRect(0,0,w,h);
+ const slot=Math.floor(w/n);
+ for(let i=0;i<n;i++){
+  const x=6+i*slot;
+  ctx.fillStyle='#f4f4f4';ctx.fillRect(x,90,slot-8,70);
+  ctx.fillStyle='#222';ctx.fillRect(x+10,104,slot-28,14);ctx.fillRect(x+10,126,slot-36,14);
+  ctx.fillStyle='#efbf00';ctx.fillRect(x,168,slot-8,52);
+ }
+ const shelf=analyzeShelf(canvas,()=>createCanvas(1,1));
+ assert.equal(shelf.strips.length,n,JSON.stringify(shelf.strips.map(s=>s.bbox)));
 });
 test('start offers image add and camera, then process with a blinking status and yellow book borders',()=>{
  const html=readFileSync(new URL('./dist/index.html',import.meta.url),'utf8'),app=readFileSync(new URL('./dist/app.js',import.meta.url),'utf8');
@@ -195,5 +208,6 @@ test('start offers image add and camera, then process with a blinking status and
  assert.match(app,/createImageBitmap|image-files/);assert.match(app,/processBatch/);
  assert.match(app,/audio:false/);assert.match(app,/#ffe000/);assert.match(app,/strokeRect/);assert.match(app,/fillText/);
  assert.match(app,/call-list/);assert.match(app,/formatCallNumber/);assert.match(app,/resultCard/);assert.match(app,/call-count/);
+ assert.match(app,/analyzeShelf\(snapshot,\s*undefined,\s*nativeFrame\)/);
  assert.doesNotMatch(app,/setInterval\(tick/);
 });

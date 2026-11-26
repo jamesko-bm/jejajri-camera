@@ -139,7 +139,7 @@ async function processFrame(native,snap,token){
  const engine=await getWorker();if(token!==job||document.hidden)return null;
  const image=snapshotContext.getImageData(0,0,snapshot.width,snapshot.height),encoded=snapshot.toDataURL('image/png');
  const prepare=(book,part,variant)=>prepareLine(nativeFrame,book,part,image.width,undefined,variant);
- prepare.tiles=()=>detectionTiles(nativeFrame,image.width);prepare.shelf=()=>analyzeShelf(snapshot);
+ prepare.tiles=()=>detectionTiles(nativeFrame,image.width);prepare.shelf=()=>analyzeShelf(snapshot,undefined,nativeFrame);
  const labels=await withTimeout(recognizeLabels(engine,encoded,image.width,image.height,()=>token===job&&!document.hidden,prepare));
  if(token!==job||document.hidden)return null;
  return refineBookEdges(labels,image);
