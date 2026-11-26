@@ -19,6 +19,8 @@ export function preferAuthor(current,next){
   if(/[ㄱ-ㅎ]$/.test(next)&&!/[ㄱ-ㅎ]$/.test(current))return next;
   if(next.length>current.length&&next.startsWith(current.replace(/[ㄱ-ㅎ]$/,'').slice(0,Math.min(current.length,2))))return next;
  }
+ if(next&&!current)return next;
+ if(next&&isAuthor(next))return next;
  return current||'';
 }
 export function takeVolume(text){
@@ -49,14 +51,32 @@ function finishAuthor(compact){
  return isAuthor(body)?body:'';
 }
 const AUTHOR_TAIL={트:'ㅋ',크:'ㅋ',르:'ㅋ',키:'ㅋ',오:'ㅇ',으:'ㅇ',우:'ㅇ',요:'ㅇ',로:'ㅇ',드:'ㄷ',디:'ㄷ'};
+function compactAuthor(text){
+ return cleanLabel(text).replace(/[|丨\-‐‑–—/'"`.,·ㆍ]/g,'').replace(/[©○●∘◦®]/g,'ㅇ').replace(/[≡≣]/g,'ㅋ');
+}
 export function normalizeAuthor(text){
- const compact=cleanLabel(text).replace(/[|丨\-‐‑–—/'"`.,·ㆍ]/g,'').replace(/[©○●∘◦®]/g,'ㅇ').replace(/[≡≣]/g,'ㅋ');
+ const compact=compactAuthor(text);
  const circledEnd=/^([가-힣]{1,3}\d{1,4})[ㄱ-ㅎ]?ㅇ$/.test(compact)?compact.replace(/[ㄱ-ㅎ]?ㅇ$/,'ㅇ'):compact;
  const tailed=AUTHOR_TAIL[circledEnd.slice(-1)]?circledEnd.slice(0,-1)+AUTHOR_TAIL[circledEnd.slice(-1)]:circledEnd;
  const circled=/^[가-힣]{1,3}\d{1,4}[oO]$/.test(tailed)?`${tailed.slice(0,-1)}ㅇ`:tailed;
  const closed=/^[0Oo]\d{3,}3$/.test(circled)?`${circled.slice(0,-1)}ㅋ`:circled;
  const embedded=circled.match(/[가-힣]{1,3}\d{1,4}(?:[ㄱ-ㅎㅏ-ㅣ]\d{0,3})?/);
  return finishAuthor(circled)||finishAuthor(compact.replace(/=+$/,'ㅋ'))||finishAuthor(closed)||(embedded?finishAuthor(embedded[0]):'');
+}
+export function extractAuthorMark(text){
+ const full=normalizeAuthor(text);
+ if(full)return full;
+ const raw=String(text||'').replace(/\s+/g,'');
+ if(/^(?:v|권|c)[^\d]{0,4}[1-9]$/i.test(raw))return '';
+ const compact=compactAuthor(text);
+ const hangul=compact.match(/[가-힣]{1,3}\d{1,4}(?:[ㄱ-ㅎㅏ-ㅣ]\d{0,3})?/);
+ if(hangul){const n=normalizeAuthor(hangul[0]);if(n)return n;}
+ const withJamo=compact.match(/(\d{1,4})([ㄱ-ㅎ])/);
+ if(withJamo&&!isCollectionBadge(withJamo[1]))return withJamo[1]+withJamo[2];
+ const rest=compact.replace(/^\d{3}\d?/,'').replace(/^[가-힣]+/,'');
+ const mark=rest.match(/(\d{2,4})([ㄱ-ㅎ])?/);
+ if(!mark||isCollectionBadge(mark[1]))return '';
+ return mark[1]+(mark[2]||'');
 }
 function classDiff(a,b){
  const n=Math.min(a.length,b.length);let d=Math.abs(a.length-b.length);
@@ -87,17 +107,23 @@ export function snapShelfClasses(books){
 }
 export function snapShelfAuthors(books){
  const authors=books.map(b=>b.author).filter(isAuthor);
- if(authors.length<3)return books;
+ if(authors.length<2)return books;
  const counts=new Map();
  for(const a of authors){const s=a.match(/^[가-힣]{1,3}/)[0];counts.set(s,(counts.get(s)||0)+1);}
  let mode='',best=0;for(const [s,n] of counts)if(n>best){mode=s;best=n;}
- if(best<Math.max(3,Math.ceil(authors.length*.4)))return books;
+ if(!mode||best<Math.max(2,Math.ceil(authors.length*.35)))mode='';
+ const tails=new Map();
+ for(const a of authors){const t=a.match(/[ㄱ-ㅎ]$/);if(t)tails.set(t[0],(tails.get(t[0])||0)+1);}
+ let tail='',tailN=0;for(const [t,n] of tails)if(n>tailN){tail=t;tailN=n;}
+ if(tailN<Math.max(2,Math.ceil(authors.length*.35)))tail='';
  return books.map(b=>{
-  const a=b.author||'';
-  if(isAuthor(a)&&a.startsWith(mode))return b;
-  const rest=a.match(/\d{1,4}(?:[ㄱ-ㅎㅏ-ㅣ]\d{0,3})?/);
-  if(rest&&isAuthor(mode+rest[0]))return {...b,author:mode+rest[0]};
-  return b;
+  let a=b.author||'';
+  if(mode&&!(isAuthor(a)&&a.startsWith(mode))){
+   const rest=(a.match(/\d{1,4}(?:[ㄱ-ㅎㅏ-ㅣ]\d{0,3})?/)||[])[0];
+   if(rest&&isAuthor(mode+rest))a=mode+rest;
+  }
+  if(tail&&isAuthor(a)&&!/[ㄱ-ㅎ]$/.test(a)&&isAuthor(a+tail))a=a+tail;
+  return a===b.author?b:{...b,author:a};
  });
 }
 // A round cutter mark is often read as © or a trailing 6. Keep it as ㅇ when the glyph is a circle.
@@ -114,6 +140,7 @@ function takeClass(token){
  if(!compact)return {classification:'',rest:original};
  const lead=compact.match(/^1(0\d{2}\.\d{1,4})(?!\d)(.*)$/);
  if(lead)return {classification:lead[1],rest:lead[2]};
+ const cutterish=s=>/^[ㄱ-ㅎㅏ-ㅣ가-힣]/.test(s||'');
  const exact=compact.match(/^(\d{3}\.\d{1,4})(?!\d)(.*)$/);
  if(exact)return {classification:exact[1],rest:exact[2]};
  const dropped=compact.match(/^(0[1-9]\.\d{1,4})(?!\d)(.*)$/);
@@ -121,12 +148,12 @@ function takeClass(token){
  if(!compact.includes('.')){
   const hangul=/[가-힣ㄱ-ㅎㅏ-ㅣ]/;
   const five=compact.match(/^(\d{3})(\d{2})(?!\d)(.*)$/);
-  if(five&&!hangul.test(five[3]))return {classification:`${five[1]}.${five[2]}`,rest:five[3]};
+  if(five&&!hangul.test(five[3])&&!cutterish(five[3]))return {classification:`${five[1]}.${five[2]}`,rest:five[3]};
   const four=compact.match(/^(\d{3})(\d)(?!\d)(.*)$/);
-  if(four&&!hangul.test(four[3]))return {classification:`${four[1]}.${four[2]}`,rest:four[3]};
+  if(four&&!hangul.test(four[3])&&!cutterish(four[3]))return {classification:`${four[1]}.${four[2]}`,rest:four[3]};
  }
  const bare=compact.match(/^(\d{3})(?!\d)(.*)$/);
- if(bare)return {classification:bare[1],rest:bare[2]};
+ if(bare)return cutterish(bare[2])?{classification:'',rest:compact}:{classification:bare[1],rest:bare[2]};
  return {classification:'',rest:compact};
 }
 export function repairClass(text){
@@ -145,7 +172,16 @@ function readLineFields(line){
   }
   else pending+=token;
  }
- return {classification,author:normalizeAuthor(pending)||circleAuthor(pending)};
+ return {classification,author:normalizeAuthor(pending)||circleAuthor(pending)||extractAuthorMark(pending)};
+}
+export function interpretAuthorLine(text){
+ let volume='',copy='';
+ for(const line of String(text??'').split(/\r?\n/)){
+  if(!volume)volume=takeVolume(line);
+  if(!copy)copy=takeCopy(line);
+ }
+ const author=normalizeAuthor(text)||circleAuthor(text)||extractAuthorMark(text);
+ return {classification:'',author,volume,copy};
 }
 // A spine label is two lines: 005.13 / 이211ㅋ or 598.1 / 슈38ㅋ. Either line may arrive first.
 export function interpretCallNumber(...parts){
@@ -158,9 +194,10 @@ export function interpretCallNumber(...parts){
    if(dup&&!copy)copy=dup;
    const fields=readLineFields(line);
    classification=preferClass(classification,fields.classification);
-   if(fields.author)author=fields.author;
+   author=preferAuthor(author,fields.author);
   }
  }
+ if(!author)author=extractAuthorMark(parts.filter(Boolean).join('\n'));
  return {classification,author,volume,copy};
 }
 export function parseShelfText(raw){

@@ -1,7 +1,7 @@
 import {test} from 'node:test';import assert from 'node:assert/strict';
 import {decreasingBooks,RecognitionGate,frameDifference,cameraCandidates,refineBookEdges} from './dist/camera-core.mjs';
 import {readFileSync} from 'node:fs';
-import {readLabels,normalizeAuthor,parseShelfText,repairClass,interpretCallNumber,snapShelfClasses,formatCallNumber,preferAuthor} from './dist/labels.mjs';
+import {readLabels,normalizeAuthor,parseShelfText,repairClass,interpretCallNumber,interpretAuthorLine,extractAuthorMark,snapShelfClasses,snapShelfAuthors,formatCallNumber,preferAuthor} from './dist/labels.mjs';
 import {recognizeLabels} from './dist/recognition.mjs';
 import {improveCameraFocus,analyzeShelf} from './dist/image-preparation.mjs';
 import {createCanvas} from '@napi-rs/canvas';
@@ -93,6 +93,17 @@ test('children shelf labels: 598.1, one-decimal class, yellow 500 badge, hyphen 
  assert.equal(interpretCallNumber('v.z').volume,'2');
  assert.deepEqual(interpretCallNumber('598.1','신68ㅇ','v.1','c.2'),call('598.1','신68ㅇ','1','2'));
  assert.equal(formatCallNumber({classification:'598.1',author:'신68ㅇ',volume:'1',copy:'2'}),'598.1 신68ㅇ v.1 c.2');
+ assert.equal(formatCallNumber({classification:'598.1',author:''}),'598.1');
+ assert.equal(formatCallNumber({classification:'598.1',author:'신211ㅇ'}),'598.1 신211ㅇ');
+ assert.deepEqual(interpretCallNumber('598.1 신211ㅇ'),call('598.1','신211ㅇ'));
+ assert.deepEqual(interpretCallNumber('598.1','211ㅇ'),call('598.1','211ㅇ'));
+ assert.deepEqual(interpretCallNumber('598.1\n211ㅇ'),call('598.1','211ㅇ'));
+ assert.equal(extractAuthorMark('211ㅇ'),'211ㅇ');
+ assert.equal(extractAuthorMark('c.2'),'');
+ assert.equal(interpretAuthorLine('211ㅇ').author,'211ㅇ');
+ assert.equal(interpretAuthorLine('신53≡').author,'신53ㅋ');
+ assert.deepEqual(snapShelfAuthors(['신211ㅇ','211ㅇ','신53ㅋ','신68ㅇ'].map(author=>({author}))).map(b=>b.author),['신211ㅇ','신211ㅇ','신53ㅋ','신68ㅇ']);
+ assert.deepEqual(snapShelfAuthors(['신211','신225ㅇ','신53ㅋ','신68ㅇ','신68ㅇ'].map(author=>({author}))).map(b=>b.author),['신211ㅇ','신225ㅇ','신53ㅋ','신68ㅇ','신68ㅇ']);
  const words=[word('598.1',20,100,40,16),word('이67ㄷ',20,122,40,16),word('500',20,150,40,18),word('598.1',120,100,40,16),word('이31ㄱ',120,122,40,16),word('500',120,150,40,18)];
  const books=readLabels(words,300,250);
  assert.deepEqual(books.map(b=>b.classification),['598.1','598.1']);

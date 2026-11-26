@@ -1,4 +1,4 @@
-import {readLabels,cleanLabel,normalizeAuthor,parseShelfText,interpretCallNumber,circleAuthor,preferClass as pickClass,preferAuthor,isFullClass,isCollectionBadge,snapShelfClasses,snapShelfAuthors} from './labels.mjs';
+import {readLabels,cleanLabel,normalizeAuthor,parseShelfText,interpretCallNumber,interpretAuthorLine,extractAuthorMark,circleAuthor,preferClass as pickClass,preferAuthor,isAuthor,isFullClass,isCollectionBadge,snapShelfClasses,snapShelfAuthors} from './labels.mjs';
 
 const DIGIT_WHITELIST='0123456789.';
 const JAMO=Array.from({length:0x3163-0x3131+1},(_,i)=>String.fromCharCode(0x3131+i)).join('');
@@ -44,7 +44,7 @@ function mergeShelf(scene,strips){
  }
  items.sort((a,b)=>a.bbox[0]-b.bbox[0]);
  if(!items.length)return [];
- return snapShelfAuthors(snapShelfClasses(items)).map((s,i)=>({id:`V${String(i+1).padStart(2,'0')}`,classification:s.classification,author:s.author||'',volume:s.volume||'',copy:s.copy||'',bbox:s.bbox.map(Math.round),labelBox:s.bbox.map(Math.round),confidence:s.confidence||0,confirmed:false,uncertain:!!s.uncertain||!isFullClass(s.classification)||!s.author}));
+ return snapShelfAuthors(snapShelfClasses(items)).map((s,i)=>({id:`V${String(i+1).padStart(2,'0')}`,classification:s.classification,author:s.author||'',volume:s.volume||'',copy:s.copy||'',bbox:s.bbox.map(Math.round),labelBox:s.bbox.map(Math.round),confidence:s.confidence||0,confirmed:false,uncertain:!!s.uncertain||!isFullClass(s.classification)||!isAuthor(s.author||'')}));
 }
 
 async function recognizeShelf(engine,prepare,width,height,isCurrent){
@@ -64,45 +64,50 @@ async function recognizeShelf(engine,prepare,width,height,isCurrent){
    const {data:line}=await engine.recognize(image);
    return interpretCallNumber(line?.text||'');
   };
-  let parsed={classification:'',author:'',volume:'',copy:''},topWasClass=false,topAuthor='',confidence=0;
-  const take=async (image,whitelist,kind,psm='7')=>{
+  const readAuthor=async (image,psm='7')=>{
+   if(!image||!isCurrent())return {classification:'',author:'',volume:'',copy:''};
+   await engine.setParameters({tessedit_pageseg_mode:String(psm),tessedit_char_whitelist:''});
+   const {data:line}=await engine.recognize(image);
+   return interpretAuthorLine(line?.text||'');
+  };
+  let parsed={classification:'',author:'',volume:'',copy:''},confidence=0;
+  const takeClass=async (image,whitelist,psm='7')=>{
    if(!image||!isCurrent())return;
    const fields=await readLine(image,whitelist,psm);
-   if(kind==='class'){if(fields.classification)parsed=preferFields(parsed,{classification:fields.classification,author:'',volume:'',copy:''});}
-   else parsed=preferFields(parsed,asAuthor(fields));
+   parsed=preferFields(parsed,{classification:fields.classification,author:fields.author,volume:fields.volume,copy:fields.copy});
   };
-  if(lines[0]){await take(lines[0],'','class');topWasClass=!!parsed.classification;}
-  if(lines[0]&&!isFullClass(parsed.classification))await take(gray[0],'','class');
-  if(lines[0]&&!isFullClass(parsed.classification))await take(lines[0],DIGIT_WHITELIST,'class');
+  const takeAuthor=async (image,psm='7')=>{
+   if(!image||!isCurrent())return;
+   parsed=preferFields(parsed,asAuthor(await readAuthor(image,psm)));
+  };
+  if(!isCurrent())return [];
+  await engine.setParameters({tessedit_pageseg_mode:'6',tessedit_char_whitelist:''});
+  const {data}=await engine.recognize(strip.image);
+  confidence=data.confidence||0;
+  parsed=preferFields(parsed,interpretCallNumber(data.text||''));
+  const circledWhole=circleAuthor(data.text||'');
+  if(circledWhole)parsed.author=preferAuthor(parsed.author,circledWhole)||circledWhole;
+  if(!parsed.author){const mark=extractAuthorMark(data.text||'');if(mark)parsed.author=mark;}
+  if(lines[0])await takeClass(lines[0],'');
+  if(lines[0]&&!isFullClass(parsed.classification))await takeClass(gray[0],'');
+  if(lines[0]&&!isFullClass(parsed.classification))await takeClass(invert[0],'');
+  if(lines[0]&&!isFullClass(parsed.classification))await takeClass(lines[0],DIGIT_WHITELIST);
   if(lines[0]&&/^[17]\d{2}\.\d{1,4}$/.test(parsed.classification)){
    const open=await readLine(lines[0],'');
    if(/^00\d\.\d{1,4}$/.test(open.classification))parsed={...parsed,classification:open.classification};
   }
   if(!isCurrent())return [];
-  if(lines[1]){
-   const authorLine=asAuthor(await readLine(lines[1],''));
-   topAuthor=authorLine.author;
-   parsed=preferFields(parsed,authorLine);
-   const circled=circleAuthor(authorLine.author);
-   if(circled)parsed.author=circled;
-  }
-  if(!parsed.author)await take(gray[1],'','author');
-  if(!parsed.author)await take(lines[1],'','author','8');
-  for(let i=2;i<lines.length;i++)parsed=preferFields(parsed,asAuthor(await readLine(lines[i],'')));
-  if(!parsed.author&&topAuthor&&!topWasClass)parsed=preferFields(parsed,{classification:'',author:topAuthor,volume:'',copy:''});
+  if(lines[1])await takeAuthor(lines[1]);
+  if(!parsed.author)await takeAuthor(gray[1]);
+  if(!parsed.author)await takeAuthor(lines[1],'8');
+  if(!parsed.author)await takeAuthor(invert[1]);
+  if(!parsed.author&&lines[0])await takeAuthor(lines[0]);
+  for(let i=2;i<lines.length;i++)parsed=preferFields(parsed,asAuthor(await readAuthor(lines[i])));
   if(lines[1]&&!isFullClass(parsed.classification)){
    if(!isCurrent())return [];
    parsed=preferFields(parsed,await readLine(lines[1],DIGIT_WHITELIST));
   }
-  if(!isCurrent())return [];
-  await engine.setParameters({tessedit_pageseg_mode:'6',tessedit_char_whitelist:''});
-  const {data}=await engine.recognize(strip.image);
-  confidence=data.confidence||0;
-  const whole=interpretCallNumber(data.text||'');
-  parsed=preferFields(parsed,whole);
-  const circled=circleAuthor(data.text||'');
-  if(circled)parsed.author=preferAuthor(parsed.author,circled)||circled;
-  strips.push({classification:parsed.classification,author:parsed.author,volume:parsed.volume||'',copy:parsed.copy||'',uncertain:!isFullClass(parsed.classification)||!parsed.author,bbox:strip.bbox,confidence});
+  strips.push({classification:parsed.classification,author:parsed.author,volume:parsed.volume||'',copy:parsed.copy||'',uncertain:!isFullClass(parsed.classification)||!isAuthor(parsed.author||''),bbox:strip.bbox,confidence});
  }
  return mergeShelf(books,strips);
 }
