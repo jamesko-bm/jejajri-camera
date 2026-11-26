@@ -61,32 +61,34 @@ function labelBand(data,width,height){
   }
   rows.push({paper:paper/n,blue:blue/n,pink:pink/n,yellow:yellow/n,edge:edge/n});
  }
- let paperPeak=0;
- for(let y=0;y<height;y++)if(rows[y].paper>paperPeak)paperPeak=rows[y].paper;
- const lo=Math.round(height*0.42);
- let yellowPeak=0,yellowAt=height;
- for(let y=lo;y<height;y++)if(rows[y].yellow>yellowPeak)yellowPeak=rows[y].yellow;
- for(let y=lo;y<height;y++)if(rows[y].yellow>yellowPeak*0.45)yellowAt=y;
+ const searchTop=height<240?0:Math.round(height*0.35),searchBottom=Math.round(height*0.95);
+ let paperPeak=0,paperAt=Math.round((searchTop+searchBottom)/2);
+ for(let y=searchTop;y<searchBottom;y++)if(rows[y].paper>=paperPeak){paperPeak=rows[y].paper;paperAt=y;}
+ if(height<240&&paperPeak>0.15)return {label:[0,height],yellow:null};
+ const paperThr=Math.max(0.16,paperPeak*0.5);
+ let paperTop=paperAt,paperBot=paperAt;
+ while(paperTop>searchTop&&rows[paperTop].paper>=paperThr)paperTop--;
+ while(paperBot<searchBottom-1&&rows[paperBot].paper>=paperThr)paperBot++;
+ const maxH=Math.max(48,Math.round(height*0.08));
+ if(height>=240&&paperBot-paperTop>maxH){
+  paperTop=Math.max(searchTop,paperAt-Math.floor(maxH*0.55));
+  paperBot=Math.min(searchBottom,paperTop+maxH);
+ }
+ const label=[Math.max(0,paperTop),Math.min(height,paperBot+1)];
+ const labelH=Math.max(24,label[1]-label[0]);
+ const yLo=label[1],yHi=Math.min(height,label[1]+Math.round(labelH*1.15));
+ let yellowPeak=0,yellowAt=yLo;
+ for(let y=yLo;y<yHi;y++)if(rows[y].yellow>=yellowPeak){yellowPeak=rows[y].yellow;yellowAt=y;}
  if(yellowPeak>0.08){
   let coreTop=yellowAt,coreBot=yellowAt;
-  while(coreTop>0&&rows[coreTop].yellow>yellowPeak*0.45)coreTop--;
-  while(coreBot<height-1&&rows[coreBot].yellow>yellowPeak*0.45)coreBot++;
-  const badgeH=Math.max(12,coreBot-coreTop);
-  const maxBadge=Math.max(badgeH,Math.round(height*0.09));
-  let top=yellowAt,bottom=yellowAt;
-  while(top>0&&rows[top].yellow>yellowPeak*0.32&&yellowAt-top<maxBadge)top--;
-  while(bottom<height-1&&rows[bottom].yellow>yellowPeak*0.32&&bottom-yellowAt<maxBadge)bottom++;
-  const labelH=Math.max(Math.round(badgeH*1.35),40);
-  return {label:[Math.max(0,top-labelH),top],yellow:[coreTop,coreBot]};
+  const cap=Math.max(14,Math.round(labelH*0.9));
+  while(coreTop>yLo&&rows[coreTop].yellow>yellowPeak*0.4&&yellowAt-coreTop<cap)coreTop--;
+  while(coreBot<yHi-1&&rows[coreBot].yellow>yellowPeak*0.4&&coreBot-yellowAt<cap)coreBot++;
+  return {label,yellow:[coreTop,Math.min(height,coreBot+1)]};
  }
- let first=-1,last=0;
- for(let y=0;y<height;y++)if(rows[y].paper>Math.max(0.2,paperPeak*0.35)){if(first<0)first=y;last=y;}
- if(paperPeak>0.25&&first>=0&&last-first>10)return {label:[first,Math.min(height,last+1)],yellow:null};
- const searchBottom=Math.round(height*.95),searchTop=Math.round(height*.18);
- let peak=0,at=Math.round((searchTop+searchBottom)/2);
- for(let y=searchTop;y<searchBottom;y++)if(rows[y].paper>0.18&&rows[y].pink<0.08&&rows[y].paper>=peak){peak=rows[y].paper;at=y;}
+ if(paperPeak>0.2)return {label,yellow:null};
  const pad=Math.max(28,Math.round(height*0.06));
- return {label:[Math.max(0,at-pad),Math.min(searchBottom,at+pad+6)],yellow:null};
+ return {label:[Math.max(0,paperAt-pad),Math.min(searchBottom,paperAt+pad+6)],yellow:null};
 }
 
 function smooth1(raw){
@@ -123,25 +125,24 @@ function hysteresisRuns(score,width,on,off,minW){
  return spans;
 }
 
-function splitAtShadows(bg,paper,typical){
- const width=bg.length;
- const bright=[];
- for(let x=0;x<width;x++)if(paper[x]>0.28)bright.push(bg[x]);
- bright.sort((a,b)=>a-b);
- const sticker=bright.length?bright[Math.floor(bright.length*0.5)]:200;
- const minW=Math.max(8,Math.round(typical*0.28));
- const look=Math.max(8,Math.round(typical*0.28));
- const valleys=[];
- for(let x=minW;x<width-minW;x++){
-  const v=bg[x];
-  if(v>bg[x-1]||v>bg[x+1]||v>sticker-6)continue;
-  let leftMax=0,rightMax=0;
-  for(let k=3;k<=look;k++){
-   if(x-k>=0)leftMax=Math.max(leftMax,bg[x-k]);
-   if(x+k<width)rightMax=Math.max(rightMax,bg[x+k]);
-  }
-  if(leftMax-v>=10&&rightMax-v>=10)valleys.push({x,v});
+function paperCore(data,width,y0,y1){
+ const h=Math.max(1,y1-y0),row=new Float64Array(h);
+ for(let y=y0;y<y1;y++){
+  let p=0,n=0;
+  for(let x=0;x<width;x+=2){n++;if(isPaper(data[(y*width+x)*4],data[(y*width+x)*4+1],data[(y*width+x)*4+2]))p++;}
+  row[y-y0]=p/Math.max(1,n);
  }
+ let peak=0,at=Math.floor(h/2);
+ for(let i=0;i<h;i++)if(row[i]>=peak){peak=row[i];at=i;}
+ if(peak<0.12)return [y0,y1];
+ const thr=Math.max(0.12,peak*0.5);
+ let a=at,b=at;
+ while(a>0&&row[a]>=thr)a--;
+ while(b<h-1&&row[b]>=thr)b++;
+ if(b-a<16){const pad=Math.ceil((16-(b-a))/2);a=Math.max(0,a-pad);b=Math.min(h-1,b+pad);}
+ return [y0+a,y0+b+1];
+}
+function clusterValleys(valleys,minW){
  const cuts=[];
  let cluster=[];
  const emit=()=>{
@@ -157,10 +158,65 @@ function splitAtShadows(bg,paper,typical){
   cluster.push(val);
  }
  emit();
+ return cuts;
+}
+function splitAtShadows(bg,paper,typical){
+ const width=bg.length;
+ const bright=[];
+ for(let x=0;x<width;x++)if(paper[x]>0.28)bright.push(bg[x]);
+ bright.sort((a,b)=>a-b);
+ const sticker=bright.length?bright[Math.floor(bright.length*0.5)]:200;
+ const minW=Math.max(8,Math.round(typical*0.22));
+ const look=Math.max(8,Math.round(typical*0.28));
+ const valleys=[];
+ for(let x=minW;x<width-minW;x++){
+  const v=bg[x];
+  if(v>bg[x-1]||v>bg[x+1]||v>sticker-6)continue;
+  let leftMax=0,rightMax=0,leftP=0,rightP=0;
+  for(let k=2;k<=look;k++){
+   if(x-k>=0){leftMax=Math.max(leftMax,bg[x-k]);leftP=Math.max(leftP,paper[x-k]);}
+   if(x+k<width){rightMax=Math.max(rightMax,bg[x+k]);rightP=Math.max(rightP,paper[x+k]);}
+  }
+  if(leftMax-v>=10&&rightMax-v>=10&&leftP-paper[x]>=0.14&&rightP-paper[x]>=0.14)valleys.push({x,v});
+ }
+ const cuts=clusterValleys(valleys,minW);
  if(!cuts.length)return [[0,width]];
  const bounds=[0,...cuts,width],spans=[];
  for(let i=0;i<bounds.length-1;i++)if(bounds[i+1]-bounds[i]>=minW)spans.push([bounds[i],bounds[i+1]]);
  return spans;
+}
+function maskSpans(bg,paper,typical){
+ const width=bg.length;
+ const bright=[];
+ for(let x=0;x<width;x++)if(paper[x]>0.2)bright.push(bg[x]);
+ bright.sort((a,b)=>a-b);
+ const sticker=bright.length?bright[Math.floor(bright.length*0.5)]:200;
+ const minW=Math.max(6,Math.round(typical*0.16));
+ const spans=[];let inside=false,start=0;
+ for(let x=0;x<width;x++){
+  const on=bg[x]>=sticker-5&&paper[x]>0.1;
+  if(!inside&&on){inside=true;start=x;}
+  else if(inside&&!on){if(x-start>=minW)spans.push([start,x]);inside=false;}
+ }
+ if(inside&&width-start>=minW)spans.push([start,width]);
+ return spans;
+}
+function groupByBadges(spans,badges){
+ if(!spans.length||!badges||badges.length<3)return spans;
+ const centers=badges.map(([a,b])=>(a+b)/2);
+ const groups=centers.map(()=>[]);
+ for(const span of spans){
+  const mid=(span[0]+span[1])/2;
+  let best=0,bestD=1e9;
+  for(let i=0;i<centers.length;i++){const d=Math.abs(mid-centers[i]);if(d<bestD){bestD=d;best=i;}}
+  groups[best].push(span);
+ }
+ return groups.map((g,i)=>{
+  if(g.length)return [g[0][0],g[g.length-1][1]];
+  const left=i?Math.round((centers[i-1]+centers[i])/2):Math.max(0,badges[i][0]-6);
+  const right=i+1<centers.length?Math.round((centers[i]+centers[i+1])/2):badges[i][1]+6;
+  return [left,Math.max(left+8,right)];
+ });
 }
 
 function spanTypical(spans,hint){
@@ -171,8 +227,8 @@ function spanTypical(spans,hint){
 function splitWideSpans(spans,score,hint){
  if(!spans.length)return spans;
  const expected=spanTypical(spans,hint);
- const cap=Math.max(expected*1.8,hint*1.6,40);
- const minW=Math.max(8,Math.round(expected*0.32));
+ const cap=Math.max(expected*1.9,hint*1.6,40);
+ const minW=Math.max(6,Math.round(expected*0.28));
  let out=spans;
  for(let pass=0;pass<8;pass++){
   const next=[];
@@ -181,10 +237,10 @@ function splitWideSpans(spans,score,hint){
    if(b-a<=cap){next.push([a,b]);continue;}
    const lo=a+Math.max(minW,Math.round((b-a)*0.08)),hi=b-Math.max(minW,Math.round((b-a)*0.08));
    if(hi<=lo){next.push([a,b]);continue;}
-   let best=lo,bestV=1,sum=0,n=0;
+   let best=lo,bestV=1e9,sum=0,n=0;
    for(let x=lo;x<hi;x++){const v=score[x];sum+=v;n++;if(v<=bestV){bestV=v;best=x;}}
    const mean=sum/Math.max(1,n);
-   if(bestV>mean*0.88)best=Math.round((a+b)/2);
+   if(mean<=1.5?bestV>mean*0.88:bestV>mean-4){next.push([a,b]);continue;}
    if(best-a>=minW&&b-best>=minW){next.push([a,best],[best,b]);did=true;}
    else next.push([a,b]);
   }
@@ -213,15 +269,16 @@ function mergeBrokenStickers(spans,data,width,y0,y1){
  }
  return out;
 }
-function rejoinThin(spans,width,typical,maxGap=6){
+function rejoinThin(spans,width,typical,maxGap=4){
  if(spans.length<2)return spans;
- const expected=Math.max(24,typical);
+ const expected=Math.max(20,typical);
  const out=[];
  for(const [a,b] of spans){
   if(out.length){
    const prev=out[out.length-1],prevW=prev[1]-prev[0],w=b-a,combined=b-prev[0],gap=a-prev[1];
-   const close=gap>=0&&gap<=Math.max(maxGap,expected*0.08);
-   if(close&&combined<=expected*1.6&&(w<expected*0.5||prevW<expected*0.5)){prev[1]=b;continue;}
+   const close=gap<=Math.max(maxGap,expected*0.05);
+   const sliver=w<expected*0.28||prevW<expected*0.28;
+   if(close&&sliver&&combined<=expected*1.85){prev[1]=b;continue;}
   }
   out.push([a,b]);
  }
@@ -234,15 +291,20 @@ function keepStickerSpans(spans,paper){
   return n&&sum/n>=0.16&&peak>=0.28;
  });
 }
-function stickerSpans(data,width,y0,y1){
- const {paper,bg}=columnStats(data,width,y0,y1);
+function stickerSpans(data,width,y0,y1,badges=[]){
+ const [cy0,cy1]=(y1-y0)<140?[y0,y1]:paperCore(data,width,y0,y1);
+ const {paper,bg}=columnStats(data,width,cy0,cy1);
  const max=Math.max(...paper,0);
  if(max<0.12)return [];
- const h=Math.max(1,y1-y0);
+ const h=Math.max(1,cy1-cy0);
  const hint=Math.max(22,Math.round(h*0.65));
- const split=keepStickerSpans(splitAtShadows(bg,paper,hint),paper);
+ const valleys=keepStickerSpans(splitAtShadows(bg,paper,hint),paper);
+ let split=valleys.length>=3?valleys:keepStickerSpans(maskSpans(bg,paper,hint),paper);
+ if(badges.length>=3&&split.length<badges.length&&badges.length<=split.length*1.45+3)split=groupByBadges(split,badges);
+ else if(split.length<3)split=keepStickerSpans(splitWideSpans(split,bg,hint),paper);
  const typical=spanTypical(split,hint);
- return rejoinThin(mergeBrokenStickers(split,data,width,y0,y1),width,typical);
+ split=split.filter(([a,b])=>b-a>=Math.max(8,typical*0.22));
+ return rejoinThin(mergeBrokenStickers(split,data,width,cy0,cy1),width,typical);
 }
 function yellowBadgeSpans(data,width,y0,y1){
  const h=Math.max(1,y1-y0);
@@ -258,7 +320,8 @@ function yellowBadgeSpans(data,width,y0,y1){
  const hint=Math.max(18,Math.round(h*1.05));
  const seed=hysteresisRuns(score,width,on,off,minW);
  const typical=spanTypical(seed,hint);
- return rejoinThin(splitWideSpans(seed,score,hint),width,typical).filter(([a,b])=>b-a>=8);
+ const minBadge=Math.max(10,Math.round(typical*0.45));
+ return rejoinThin(splitWideSpans(seed,score,hint),width,typical).filter(([a,b])=>b-a>=minBadge);
 }
 function slotsFromBadges(badges,width){
  if(!badges.length)return [];
@@ -408,6 +471,21 @@ function adaptiveTrim(source,x0,y0,x1,y1,makeCanvas){
  return {image:url,grayImage,lines,grayLines,invertLines};
 }
 
+export function inspectShelf(source,makeCanvas){
+ makeCanvas=makeCanvas||(()=>document.createElement('canvas'));
+ const width=source.width,height=source.height;
+ if(!width||!height)return {band:null,stickers:0,badges:0};
+ const probe=blank(makeCanvas,width,height),pctx=probe.getContext('2d',{willReadFrequently:true});
+ pctx.drawImage(source,0,0,width,height);
+ const {data}=pctx.getImageData(0,0,width,height);
+ const bandInfo=labelBand(data,width,height);
+ const [y0,y1]=bandInfo.label;
+ const badges=bandInfo.yellow?yellowBadgeSpans(data,width,bandInfo.yellow[0],bandInfo.yellow[1]):[];
+ const raw=stickerSpans(data,width,y0,y1,[]);
+ const stickers=stickerSpans(data,width,y0,y1,badges);
+ return {band:[y0,y1],yellow:bandInfo.yellow,stickers:stickers.length,raw:raw.length,badges:badges.length,stickerSpans:stickers,badgeSpans:badges};
+}
+
 // Separate each spine at the shadow between books, then flatten uneven light.
 export function analyzeShelf(source,makeCanvas,detail=null){
  makeCanvas=makeCanvas||(()=>document.createElement('canvas'));
@@ -419,7 +497,7 @@ export function analyzeShelf(source,makeCanvas,detail=null){
  const bandInfo=labelBand(data,width,height);
  const [y0,y1]=bandInfo.label;
  const badges=bandInfo.yellow?yellowBadgeSpans(data,width,bandInfo.yellow[0],bandInfo.yellow[1]):[];
- const stickers=stickerSpans(data,width,y0,y1),shadows=shelfSpans(data,width,y0,y1);
+ const stickers=stickerSpans(data,width,y0,y1,badges),shadows=shelfSpans(data,width,y0,y1);
  const chosen=stickers.length>=3?stickers:badges.length>=3?slotsFromBadges(badges,width):shadows.length>=2?shadows:stickers;
  const spans=chosen.map(([a,b])=>[Math.max(0,a+1),Math.min(width,Math.max(a+9,b-1))]);
  if(spans.length<2)return {band:null,strips:[]};

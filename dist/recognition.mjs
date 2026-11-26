@@ -2,7 +2,7 @@ import {readLabels,cleanLabel,normalizeAuthor,parseShelfText,interpretCallNumber
 
 const DIGIT_WHITELIST='0123456789.';
 const JAMO=Array.from({length:0x3163-0x3131+1},(_,i)=>String.fromCharCode(0x3131+i)).join('');
-const AUTHOR_WHITELIST=`0123456789가김나박이정최조한신슈스원${JAMO}`;
+const AUTHOR_WHITELIST=`0123456789${JAMO}가나다라마바사아자차카타파하강고공곽구국권금기김나남노도류마명무문민박배백범변서석선설성소손송수숙순승시신심안양여연염영오옥완왕요용우운원위유윤은을음의이익인임자작잔장재저적전점정제조존종좌주준중지직진차찬창채천철청초최추춘충치친칠침카타탁탄태택토통파판팔편평포표하학한함항해행향허헌혁현혈협형혜호혼홍화확환활황회효후훈휘휴흥희슈스원`;
 
 function preferFields(primary,extra){
  const classification=pickClass(primary.classification,extra.classification)||primary.classification||extra.classification||'';
@@ -100,9 +100,10 @@ async function recognizeShelf(engine,prepare,width,height,isCurrent){
   if(lines[1])await takeAuthor(lines[1],'8');
   if(gray[1])await takeAuthor(gray[1],'7',AUTHOR_WHITELIST);
   if(gray[1])await takeAuthor(gray[1],'8',AUTHOR_WHITELIST);
+  if(lines[1])await takeAuthor(lines[1],'7',AUTHOR_WHITELIST);
   if(!isAuthor(parsed.author)&&gray[1])await takeAuthor(gray[1]);
   if(!isAuthor(parsed.author)&&gray[1])await takeAuthor(gray[1],'8');
-  if(!parsed.author&&lines[0])await takeAuthor(gray[0]||lines[0]);
+  if(!parsed.author&&gray[0])await takeAuthor(gray[0],'7',AUTHOR_WHITELIST);
   for(let i=2;i<Math.max(lines.length,gray.length);i++){
    parsed=preferFields(parsed,asAuthor(await readAuthor(gray[i]||lines[i])));
    if(lines[i])parsed=preferFields(parsed,asAuthor(await readAuthor(lines[i])));
@@ -116,8 +117,9 @@ async function recognizeShelf(engine,prepare,width,height,isCurrent){
    confidence=Math.max(confidence,data.confidence||0);
    wholeText=`${wholeText}\n${data.text||''}`;
    const whole=interpretCallNumber(data.text||'');
-   if(!isFullClass(parsed.classification)&&whole.classification)parsed=preferFields(parsed,whole);
-   else if(whole.author||whole.volume||whole.copy)parsed=preferFields(parsed,{classification:'',author:whole.author,volume:whole.volume,copy:whole.copy});
+   const author=isAuthor(parsed.author)?'':whole.author;
+   if(!isFullClass(parsed.classification)&&whole.classification)parsed=preferFields(parsed,{classification:whole.classification,author,volume:whole.volume,copy:whole.copy});
+   else if(author||whole.volume||whole.copy)parsed=preferFields(parsed,{classification:'',author,volume:whole.volume,copy:whole.copy});
   };
   if(strip.grayImage)await takeWhole(strip.grayImage);
   await takeWhole(strip.image);

@@ -186,6 +186,17 @@ test('shadow gaps between white labels split each book',()=>{
  const shelf=analyzeShelf(canvas,()=>createCanvas(1,1));
  assert.equal(shelf.strips.length,n,JSON.stringify(shelf.strips.map(s=>s.bbox)));
 });
+test('very faint shadows between packed stickers still split each book',()=>{
+ const w=2200,h=90,n=22,canvas=createCanvas(w,h),ctx=canvas.getContext('2d');
+ ctx.fillStyle='#e8e8e8';ctx.fillRect(0,0,w,h);
+ const slot=Math.floor(w/n);
+ for(let i=0;i<n;i++){
+  ctx.fillStyle='#f6f6f6';ctx.fillRect(i*slot+2,4,slot-5,h-8);
+  ctx.fillStyle='#222';ctx.fillRect(i*slot+12,14,36,10);ctx.fillRect(i*slot+12,32,30,10);
+ }
+ const shelf=analyzeShelf(canvas,()=>createCanvas(1,1));
+ assert.equal(shelf.strips.length,n,JSON.stringify(shelf.strips.map(s=>s.bbox)));
+});
 test('faint shadows between stickers split books; printed text does not',()=>{
  const w=1024,h=102,n=8,canvas=createCanvas(w,h),ctx=canvas.getContext('2d');
  ctx.fillStyle='#c8ccd0';ctx.fillRect(0,0,w,h);
