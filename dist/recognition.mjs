@@ -8,7 +8,8 @@ function preferFields(primary,extra){
  return {
   classification:pickClass(primary.classification,extra.classification)||primary.classification||'',
   author:primary.author||extra.author||'',
-  volume:primary.volume||extra.volume||''
+  volume:primary.volume||extra.volume||'',
+  copy:primary.copy||extra.copy||''
  };
 }
 
@@ -24,23 +25,24 @@ function reconcileClass(a,b){
 }
 
 function mergeShelf(scene,strips){
- const items=strips.filter(s=>s.classification||s.author).map(s=>({classification:s.classification||'',author:s.author||'',volume:s.volume||'',confidence:s.confidence||0,bbox:s.bbox,uncertain:!!s.uncertain||!s.classification||!s.author}));
+ const items=strips.filter(s=>s.classification||s.author).map(s=>({classification:s.classification||'',author:s.author||'',volume:s.volume||'',copy:s.copy||'',confidence:s.confidence||0,bbox:s.bbox,uncertain:!!s.uncertain||!s.classification||!s.author}));
  for(const book of scene){
   const cx=(book.bbox[0]+book.bbox[2])/2;
   const hit=items.find(s=>cx>=s.bbox[0]&&cx<=s.bbox[2]);
-  if(!hit){items.push({classification:book.classification,author:book.author||'',volume:book.volume||'',confidence:book.confidence||0,bbox:book.bbox,uncertain:!book.author});continue;}
+  if(!hit){items.push({classification:book.classification,author:book.author||'',volume:book.volume||'',copy:book.copy||'',confidence:book.confidence||0,bbox:book.bbox,uncertain:!book.author});continue;}
   const cls=reconcileClass(hit.classification,book.classification);
   if(!cls&&hit.classification&&book.classification&&hit.classification!==book.classification)hit.uncertain=true;
   else if(cls)hit.classification=cls;
   if(!hit.author)hit.author=book.author||'';
   if(book.volume)hit.volume=book.volume;
+  if(book.copy)hit.copy=book.copy;
   hit.confidence=Math.max(hit.confidence,book.confidence||0);
   hit.uncertain=hit.uncertain||!hit.classification||!hit.author;
  }
  items.sort((a,b)=>a.bbox[0]-b.bbox[0]);
  const kept=items.flatMap(s=>{const ok=/^\d{3}(?:\.\d{1,4})?$/.test(s.classification);if(!ok&&!s.author)return [];return [{...s,classification:ok?s.classification:'',uncertain:s.uncertain||!ok}];});
  if(kept.length<2)return [];
- return snapShelfClasses(kept).map((s,i)=>({id:`V${String(i+1).padStart(2,'0')}`,classification:s.classification,author:s.author||'',volume:s.volume||'',bbox:s.bbox.map(Math.round),labelBox:s.bbox.map(Math.round),confidence:s.confidence||0,confirmed:false,uncertain:!!s.uncertain}));
+ return snapShelfClasses(kept).map((s,i)=>({id:`V${String(i+1).padStart(2,'0')}`,classification:s.classification,author:s.author||'',volume:s.volume||'',copy:s.copy||'',bbox:s.bbox.map(Math.round),labelBox:s.bbox.map(Math.round),confidence:s.confidence||0,confirmed:false,uncertain:!!s.uncertain}));
 }
 
 async function recognizeShelf(engine,prepare,width,height,isCurrent){
@@ -62,16 +64,16 @@ async function recognizeShelf(engine,prepare,width,height,isCurrent){
   const gray=Array.isArray(strip.grayLines)?strip.grayLines:[];
   const invert=Array.isArray(strip.invertLines)?strip.invertLines:[];
   const readLine=async (image,whitelist,psm='7')=>{
-   if(!image||!isCurrent())return {classification:'',author:'',volume:''};
+   if(!image||!isCurrent())return {classification:'',author:'',volume:'',copy:''};
    await engine.setParameters({tessedit_pageseg_mode:String(psm),tessedit_char_whitelist:whitelist});
    const {data:line}=await engine.recognize(image);
    return interpretCallNumber(line?.text||'');
   };
-  let parsed={classification:'',author:'',volume:''},topWasClass=false,topAuthor='',confidence=0;
+  let parsed={classification:'',author:'',volume:'',copy:''},topWasClass=false,topAuthor='',confidence=0;
   const take=async (image,whitelist,kind,psm='7')=>{
    if(!image||!isCurrent())return;
    const fields=await readLine(image,whitelist,psm);
-   if(kind==='class'){if(fields.classification)parsed=preferFields(parsed,{classification:fields.classification,author:'',volume:''});}
+   if(kind==='class'){if(fields.classification)parsed=preferFields(parsed,{classification:fields.classification,author:'',volume:'',copy:''});}
    else parsed=preferFields(parsed,fields);
   };
   if(lines[0]){await take(lines[0],DIGIT_WHITELIST,'class');topWasClass=!!parsed.classification;}
@@ -94,7 +96,7 @@ async function recognizeShelf(engine,prepare,width,height,isCurrent){
   if(!parsed.author)await take(invert[1],'','author');
   if(!parsed.author)await take(lines[1],'','author','8');
   for(let i=2;i<lines.length;i++)parsed=preferFields(parsed,await readLine(lines[i],''));
-  if(!parsed.author&&topAuthor&&!topWasClass)parsed=preferFields(parsed,{classification:'',author:topAuthor,volume:''});
+  if(!parsed.author&&topAuthor&&!topWasClass)parsed=preferFields(parsed,{classification:'',author:topAuthor,volume:'',copy:''});
   if(lines[0]&&!parsed.author&&!topWasClass){
    if(!isCurrent())return [];
    parsed=preferFields(parsed,await readLine(lines[0],AUTHOR_WHITELIST));
@@ -117,8 +119,9 @@ async function recognizeShelf(engine,prepare,width,height,isCurrent){
    else parsed.classification=pickClass(parsed.classification,fromBand.classification)||parsed.classification;
    if(!parsed.author&&fromBand.author)parsed.author=fromBand.author;
    if(!parsed.volume&&fromBand.volume)parsed.volume=fromBand.volume;
+   if(!parsed.copy&&fromBand.copy)parsed.copy=fromBand.copy;
   }
-  strips.push({classification:parsed.classification,author:parsed.author,volume:parsed.volume||'',uncertain:!isFullClass(parsed.classification)||!parsed.author,bbox:strip.bbox,confidence});
+  strips.push({classification:parsed.classification,author:parsed.author,volume:parsed.volume||'',copy:parsed.copy||'',uncertain:!isFullClass(parsed.classification)||!parsed.author,bbox:strip.bbox,confidence});
  }
  return mergeShelf(books,strips);
 }
@@ -142,6 +145,7 @@ export async function recognizeLabels(engine,encoded,width,height,isCurrent=()=>
    hit.classification=pickClass(hit.classification,book.classification)||hit.classification;
    if(!hit.author&&book.author)hit.author=book.author;
    if(!hit.volume&&book.volume)hit.volume=book.volume;
+   if(!hit.copy&&book.copy)hit.copy=book.copy;
    hit.uncertain=!isFullClass(hit.classification)||!hit.author;
   }
   if(usableShelf(shelf))return shelf;

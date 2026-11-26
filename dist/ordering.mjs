@@ -1,12 +1,22 @@
 import {isAuthor} from './labels.mjs';
 const natural = s => s.match(/\d+|\D+/g) || [];
+const cutter = (x,y)=>{const n=Math.max(x.length,y.length);return x.padEnd(n,'0').localeCompare(y.padEnd(n,'0'));};
 export function compare(a,b){
- const decimal=(x,y)=>{const [xi,xf='']=x.split('.'),[yi,yf='']=y.split('.');if(Number(xi)!==Number(yi))return Number(xi)-Number(yi);const n=Math.max(xf.length,yf.length);return xf.padEnd(n,'0').localeCompare(yf.padEnd(n,'0'));};
+ const decimal=(x,y)=>{const [xi,xf='']=String(x).split('.'),[yi,yf='']=String(y).split('.');if(Number(xi)!==Number(yi))return Number(xi)-Number(yi);return cutter(xf,yf);};
  let d=decimal(a.classification,b.classification);if(d)return d;
  const aa=natural(a.author),bb=natural(b.author);
- for(let i=0;i<Math.min(aa.length,bb.length);i++){const x=aa[i],y=bb[i];if(x===y)continue;const nx=/^\d+$/.test(x),ny=/^\d+$/.test(y);if(nx&&ny){d=BigInt(x)<BigInt(y)?-1:BigInt(x)>BigInt(y)?1:0;}else if(nx!==ny)d=nx?1:-1;else d=x<y?-1:1;if(d)return d;}
+ let firstDigits=true;
+ for(let i=0;i<Math.min(aa.length,bb.length);i++){
+  const x=aa[i],y=bb[i];
+  if(x===y){if(/^\d+$/.test(x))firstDigits=false;continue;}
+  const nx=/^\d+$/.test(x),ny=/^\d+$/.test(y);
+  if(nx&&ny){d=firstDigits?cutter(x,y):Number(x)-Number(y);firstDigits=false;}
+  else if(nx!==ny)d=nx?1:-1;
+  else d=x<y?-1:1;
+  if(d)return d;
+ }
  if(aa.length!==bb.length)return aa.length-bb.length;
- return Number(a.volume)-Number(b.volume);
+ return Number(a.volume||0)-Number(b.volume||0);
 }
 export function misplaced(books){
  if(!books.length)return [];

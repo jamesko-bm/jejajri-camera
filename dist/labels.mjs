@@ -15,9 +15,18 @@ export function preferClass(current,next){
 export function takeVolume(text){
  const flat=String(text||'').replace(/[|丨]/g,' ').replace(/\s+/g,' ').trim();
  const volume=flat.match(/(?:^|\s)(?:v|권)\s*[.\s]?\s*([1-9]\d?)(?:\s|$)/i);
- if(volume)return volume[1];
+ return volume?volume[1]:'';
+}
+export function takeCopy(text){
+ const flat=String(text||'').replace(/[|丨]/g,' ').replace(/\s+/g,' ').trim();
  const copy=flat.match(/(?:^|\s)c\s*[.\s]?\s*([1-9]\d?)(?:\s|$)/i);
  return copy?copy[1]:'';
+}
+export function formatCallNumber(book){
+ const parts=[book?.classification||'',book?.author||''];
+ if(book?.volume)parts.push(`v.${book.volume}`);
+ if(book?.copy)parts.push(`c.${book.copy}`);
+ return parts.filter(Boolean).join(' ')||'(인식 실패)';
 }
 // A leading 0 on an author line is the usual misread of 이, as in 0164ㄷ.
 function finishAuthor(compact){
@@ -103,17 +112,19 @@ function readLineFields(line){
 }
 // A spine label is two lines: 005.13 / 이211ㅋ or 598.1 / 슈38ㅋ. Either line may arrive first.
 export function interpretCallNumber(...parts){
- let classification='',author='',volume='';
+ let classification='',author='',volume='',copy='';
  for(const part of parts){
   for(const line of String(part??'').split(/\r?\n/)){
    const vol=takeVolume(line);
    if(vol&&!volume)volume=vol;
+   const dup=takeCopy(line);
+   if(dup&&!copy)copy=dup;
    const fields=readLineFields(line);
    classification=preferClass(classification,fields.classification);
    if(fields.author)author=fields.author;
   }
  }
- return {classification,author,volume};
+ return {classification,author,volume,copy};
 }
 export function parseShelfText(raw){
  const flat=String(raw).replace(/[|丨]/g,'').replace(/[^0-9A-Za-z가-힣ㄱ-ㅎㅏ-ㅣ.=\s]/g,'').replace(/(\d)\s+\./g,'$1.').replace(/\.\s+(\d)/g,'.$1').replace(/\s+/g,' ').trim();
@@ -122,7 +133,7 @@ export function parseShelfText(raw){
  const integer=flat.match(/(?:^|\s)(\d{3})(?=\s|$)/);
  const classification=decimal?.[1]||(dropped?`0${dropped[1]}`:'')||integer?.[1]||'';
  const rest=classification?flat.replace(classification.startsWith('0')&&dropped&&!decimal?dropped[1]:classification,''):flat;
- return {classification,author:normalizeAuthor(rest),volume:takeVolume(raw)};
+ return {classification,author:normalizeAuthor(rest),volume:takeVolume(raw),copy:takeCopy(raw)};
 }
 const center = w => (w.bbox.x0+w.bbox.x1)/2;
 const lineHeight = w => w.bbox.y1-w.bbox.y0;
@@ -170,7 +181,8 @@ export function readLabels(words,width,height,minLabels=2){
  return row.map((l,i)=>{
   const a=l.anchor,left=i?(center(row[i-1].anchor)+center(a))/2:0,right=i+1<row.length?(center(a)+center(row[i+1].anchor))/2:width;
   const below=l.author?spans.filter(w=>center(w)>left&&center(w)<right&&w.bbox.y0>=l.author.bbox.y1&&w.bbox.y0<l.author.bbox.y1+lineHeight(a)*1.8):[];
-  const volume=below.find(w=>/^(?:v\.?|권|c\.?)[1-9]\d*$/i.test(w.text))?.text.replace(/^(?:v\.?|권|c\.?)/i,'')||'';
-  return {id:`V${String(i+1).padStart(2,'0')}`,classification:a.text,author:l.author?.text||'',volume,bbox:[Math.round(left),0,Math.round(right),bottom],labelBox:[a.bbox.x0,a.bbox.y0,a.bbox.x1,a.bbox.y1],confidence:a.confidence,confirmed:false};
+  const volume=below.find(w=>/^(?:v\.?|권)[1-9]\d*$/i.test(w.text))?.text.replace(/^(?:v\.?|권)/i,'')||'';
+  const copy=below.find(w=>/^c\.?[1-9]\d*$/i.test(w.text))?.text.replace(/^c\.?/i,'')||'';
+  return {id:`V${String(i+1).padStart(2,'0')}`,classification:a.text,author:l.author?.text||'',volume,copy,bbox:[Math.round(left),0,Math.round(right),bottom],labelBox:[a.bbox.x0,a.bbox.y0,a.bbox.x1,a.bbox.y1],confidence:a.confidence,confirmed:false};
  });
 }

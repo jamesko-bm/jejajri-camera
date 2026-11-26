@@ -1,6 +1,7 @@
 import {prepareLine,improveCameraFocus,detectionTiles,analyzeShelf} from './image-preparation.mjs';
 import {decreasingBooks,refineBookEdges} from './camera-core.mjs';
 import {recognizeLabels} from './recognition.mjs';
+import {formatCallNumber} from './labels.mjs';
 const $=id=>document.getElementById(id),video=$('camera'),overlay=$('overlay'),context=overlay.getContext('2d');
 const nativeFrame=document.createElement('canvas'),nativeContext=nativeFrame.getContext('2d');
 const snapshot=document.createElement('canvas'),snapshotContext=snapshot.getContext('2d',{willReadFrequently:true});
@@ -45,8 +46,8 @@ function paintBoxes(ctx,width,height,books){
    ctx.fillRect(left,top,bw,bh);
    ctx.strokeRect(left+inset,top+inset,Math.max(1,bw-weight),Math.max(1,bh-weight));
   }
-  const label=[book.classification,book.author,book.volume?`v.${book.volume}`:''].filter(Boolean).join(' ');
-  if(!label)continue;
+  const label=formatCallNumber(book);
+  if(label==='(인식 실패)')continue;
   const box=book.labelBox||book.bbox;
   const tx=Math.max(0,box[0]),ty=Math.max(0,box[1]-2);
   const size=Math.max(11,Math.min(22,Math.round((box[2]-box[0])*0.22)));
@@ -111,6 +112,26 @@ function resultCanvas(snap,books){
  const ctx=canvas.getContext('2d');ctx.drawImage(snap,0,0);paintBoxes(ctx,snap.width,snap.height,books);
  return canvas;
 }
+function callList(books){
+ const flagged=new Set(decreasingBooks(books).flagged);
+ const ol=document.createElement('ol');ol.className='call-list';
+ if(!books.length){
+  const li=document.createElement('li');li.className='miss';li.textContent='(인식 실패)';ol.append(li);return ol;
+ }
+ for(const book of books){
+  const li=document.createElement('li');
+  if(flagged.has(book))li.classList.add('flagged');
+  if(book.uncertain)li.classList.add('uncertain');
+  li.textContent=formatCallNumber(book);
+  ol.append(li);
+ }
+ return ol;
+}
+function resultCard(snap,books){
+ const card=document.createElement('section');card.className='result-card';
+ card.append(resultCanvas(snap,books),callList(books));
+ return card;
+}
 async function processFrame(native,snap,token){
  nativeFrame.width=native.width;nativeFrame.height=native.height;nativeContext.drawImage(native,0,0);
  snapshot.width=snap.width;snapshot.height=snap.height;snapshotContext.drawImage(snap,0,0);
@@ -138,13 +159,13 @@ async function processBatch(frames){
    if(order.flagged.length)flagged+=order.flagged.length;
    if(books.length>=2)readable+=1;
    overlay.hidden=true;context.clearRect(0,0,overlay.width,overlay.height);
-   $('results').append(resultCanvas(frames[i].snapshot,books));
+   $('results').append(resultCard(frames[i].snapshot,books));
   }
   if(token!==job)return;
   setView('result');
-  if(flagged)hint('노란 테두리가 잘못 꽂힌 책입니다.');
-  else if(readable)hint('잘못 꽂힌 책이 없습니다.');
-  else hint('번호가 선명하게 보이도록 다시 찍어 주세요.');
+  if(flagged)hint('아래 목록이 읽은 번호입니다. 노란 줄은 순서 오류입니다.');
+  else if(readable)hint('아래 목록이 읽은 번호입니다. 순서 오류는 없습니다.');
+  else hint('번호를 읽지 못했습니다. 흰 라벨이 보이게 다시 찍어 주세요.');
  }catch(error){
   if(token!==job)return;
   await resetWorker();setView('result');hint(error.message||'다시 찍어 주세요.');

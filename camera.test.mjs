@@ -1,7 +1,7 @@
 import {test} from 'node:test';import assert from 'node:assert/strict';
 import {decreasingBooks,RecognitionGate,frameDifference,cameraCandidates,refineBookEdges} from './dist/camera-core.mjs';
 import {readFileSync} from 'node:fs';
-import {readLabels,normalizeAuthor,parseShelfText,repairClass,interpretCallNumber,snapShelfClasses} from './dist/labels.mjs';
+import {readLabels,normalizeAuthor,parseShelfText,repairClass,interpretCallNumber,snapShelfClasses,formatCallNumber} from './dist/labels.mjs';
 import {recognizeLabels} from './dist/recognition.mjs';
 import {improveCameraFocus,analyzeShelf} from './dist/image-preparation.mjs';
 import {createCanvas} from '@napi-rs/canvas';
@@ -41,13 +41,14 @@ test('blurred author digits that start with 0 are read as 이',()=>{
  assert.equal(repairClass('4945.19'),'');
  assert.equal(parseShelfText('UUs. 10 ol211=').classification,'');
  assert.equal(normalizeAuthor('004.59'),'');
- assert.deepEqual(parseShelfText('04.59 0164ㄷ'),{classification:'004.59',author:'이64ㄷ',volume:''});
- assert.deepEqual(parseShelfText('004 .59 김94ㄱ2'),{classification:'004.59',author:'김94ㄱ2',volume:''});
- assert.deepEqual(parseShelfText('004.59 0164ㄷ'),{classification:'004.59',author:'이64ㄷ',volume:''});
- assert.deepEqual(parseShelfText('004.59 김94ㄱ2'),{classification:'004.59',author:'김94ㄱ2',volume:''});
+ const empty={volume:'',copy:''};
+ assert.deepEqual(parseShelfText('04.59 0164ㄷ'),{classification:'004.59',author:'이64ㄷ',...empty});
+ assert.deepEqual(parseShelfText('004 .59 김94ㄱ2'),{classification:'004.59',author:'김94ㄱ2',...empty});
+ assert.deepEqual(parseShelfText('004.59 0164ㄷ'),{classification:'004.59',author:'이64ㄷ',...empty});
+ assert.deepEqual(parseShelfText('004.59 김94ㄱ2'),{classification:'004.59',author:'김94ㄱ2',...empty});
  assert.equal(parseShelfText('0064.59 Bais').classification,'');
  assert.equal(repairClass('05.13'),'005.13');
- const call=(c,a,v='')=>({classification:c,author:a,volume:v});
+ const call=(c,a,v='',copy='')=>({classification:c,author:a,volume:v,copy});
  assert.deepEqual(interpretCallNumber('005.13','이211ㅋ'),call('005.13','이211ㅋ'));
  assert.deepEqual(interpretCallNumber('004.73','진91ㅋ'),call('004.73','진91ㅋ'));
  assert.deepEqual(interpretCallNumber('004.59','김94ㄱ2'),call('004.59','김94ㄱ2'));
@@ -72,21 +73,22 @@ test('000 with an author is a real label; unsupported numeric badges alone are n
  assert.equal(books[0].classification,'000');assert.equal(decreasingBooks(books).complete,true);
 });
 test('children shelf labels: 598.1, one-decimal class, yellow 500 badge, hyphen author, copy',()=>{
- const call=(c,a,v='')=>({classification:c,author:a,volume:v});
+ const call=(c,a,v='',copy='')=>({classification:c,author:a,volume:v,copy});
  assert.equal(repairClass('598.1'),'598.1');
  assert.equal(repairClass('00459'),'004.59');
  assert.equal(repairClass('5981'),'598.1');
  assert.equal(normalizeAuthor('이39-'),'이39');
  assert.equal(normalizeAuthor('슈38ㅋ'),'슈38ㅋ');
  assert.deepEqual(interpretCallNumber('598.1','슈38ㅋ'),call('598.1','슈38ㅋ'));
- assert.deepEqual(interpretCallNumber('598.1','이39-','c.2'),call('598.1','이39','2'));
+ assert.deepEqual(interpretCallNumber('598.1','이39-','c.2'),call('598.1','이39','','2'));
  assert.deepEqual(interpretCallNumber('500','598.1','슈38ㅋ'),call('598.1','슈38ㅋ'));
  assert.deepEqual(interpretCallNumber('500\n슈38ㅋ'),call('','슈38ㅋ'));
  assert.deepEqual(interpretCallNumber('598.1','신211○'),call('598.1','신211ㅇ'));
  assert.deepEqual(interpretCallNumber('598.1','신53≡'),call('598.1','신53ㅋ'));
  assert.equal(normalizeAuthor('신53트'),'신53ㅋ');
  assert.equal(normalizeAuthor('ㅣ신68ㄷ'),'신68ㄷ');
- assert.deepEqual(interpretCallNumber('598.1','신68ㅇ','v.1','c.2'),call('598.1','신68ㅇ','1'));
+ assert.deepEqual(interpretCallNumber('598.1','신68ㅇ','v.1','c.2'),call('598.1','신68ㅇ','1','2'));
+ assert.equal(formatCallNumber({classification:'598.1',author:'신68ㅇ',volume:'1',copy:'2'}),'598.1 신68ㅇ v.1 c.2');
  const words=[word('598.1',20,100,40,16),word('이67ㄷ',20,122,40,16),word('500',20,150,40,18),word('598.1',120,100,40,16),word('이31ㄱ',120,122,40,16),word('500',120,150,40,18)];
  const books=readLabels(words,300,250);
  assert.deepEqual(books.map(b=>b.classification),['598.1','598.1']);
@@ -107,7 +109,13 @@ test('conflicting crop OCR blocks affected pairs, preserves an independently con
 });
 test('decreases mark the preceding left book',()=>{const books=['100','180','410','300','320','400','500','900','600','800'].map(n=>book(n));const result=decreasingBooks(books);assert.deepEqual(result.flagged.map(b=>b.id),['410','900']);assert.equal(result.complete,true);});
 test('equal call numbers are allowed; each drop in a reverse run is marked',()=>{assert.equal(decreasingBooks([book('100'),book('100')]).flagged.length,0);assert.deepEqual(decreasingBooks(['300','200','100'].map(n=>book(n))).flagged.map(b=>b.id),['300','200']);});
-test('natural author and volume comparisons; absent fields do not invent order',()=>{assert.equal(decreasingBooks([book('100','a','김10'),book('100','b','김2')]).flagged[0].id,'a');assert.equal(decreasingBooks([book('100','a','김10','2'),book('100','b','김10','1')]).flagged[0].id,'a');assert.equal(decreasingBooks([book('100','a',''),book('100','b')]).complete,false);assert.equal(decreasingBooks([book('100')]).complete,false);assert.equal(decreasingBooks([book('100','a','김1',''),book('100','b','김1','')]).complete,true);assert.equal(decreasingBooks([book('100','a','김1',''),book('100','b','김1','2')]).complete,false);});
+test('author numbers file as cutter marks, not integers',()=>{
+ const shelf=['신211ㅇ','신225ㅇ','신53ㅋ','신68ㄷ','신68ㅇ'].map((author,i)=>book('598.1','b'+i,author,''));
+ assert.equal(decreasingBooks(shelf).flagged.length,0);
+ assert.equal(decreasingBooks([book('598.1','a','신53ㅋ',''),book('598.1','b','신211ㅇ','')]).flagged[0].id,'a');
+ assert.equal(decreasingBooks([book('598.1','a','신68ㅇ','1'),book('598.1','b','신68ㅇ','2'),book('598.1','c','신68ㅇ','3')]).flagged.length,0);
+});
+test('natural author and volume comparisons; absent fields do not invent order',()=>{assert.equal(decreasingBooks([book('100','a','김10'),book('100','b','김2')]).flagged.length,0);assert.equal(decreasingBooks([book('100','a','김2'),book('100','b','김10')]).flagged[0].id,'a');assert.equal(decreasingBooks([book('100','a','김10','2'),book('100','b','김10','1')]).flagged[0].id,'a');assert.equal(decreasingBooks([book('100','a',''),book('100','b')]).complete,false);assert.equal(decreasingBooks([book('100')]).complete,false);assert.equal(decreasingBooks([book('100','a','김1',''),book('100','b','김1','')]).complete,true);assert.equal(decreasingBooks([book('100','a','김1',''),book('100','b','김1','2')]).complete,false);});
 test('automatic settle, recognition, completion, movement and stale results',()=>{const gate=new RecognitionGate();const still=new Uint8Array([20,50,100,160]),moved=new Uint8Array([160,100,50,20]);assert.equal(gate.tick(still,0).ready,false);assert.equal(gate.tick(still,1001).ready,true);const token=gate.begin();assert.equal(gate.tick(still,1200).ready,false);assert.equal(gate.finish(token,true,1400),true);assert.equal(gate.tick(still,2500).ready,false);assert.equal(gate.tick(moved,2700).moved,true);assert.equal(gate.done,false);assert.equal(gate.tick(moved,3800).ready,true);const next=gate.begin();gate.tick(still,3900);assert.equal(gate.finish(next,true,4000),false);assert.equal(gate.done,false);});
 test('a captured frame can be interpreted while the camera moves',()=>{const gate=new RecognitionGate();const still=new Uint8Array([20,50,100,160]),moved=new Uint8Array([160,100,50,20]);gate.tick(still,0);gate.tick(still,1100);const token=gate.begin();gate.freeze();assert.equal(gate.tick(moved,1300).moved,false);assert.equal(gate.finish(token,true,1500),true);assert.equal(gate.done,true);assert.equal(gate.tick(moved,2000).moved,false);assert.equal(gate.done,true);assert.equal(gate.tick(still,2700).moved,true);assert.equal(gate.done,false);});
 test('incomplete OCR retries automatically; slow cumulative motion invalidates',()=>{const gate=new RecognitionGate({threshold:5});const a=Uint8Array.from([20,50,100,160]);gate.tick(a,0);gate.tick(a,1100);gate.finish(gate.begin(),false,1200);assert.equal(gate.tick(a,3000).ready,false);assert.equal(gate.tick(a,4300).ready,true);gate.finish(gate.begin(),true,4400);for(let i=1;i<=8;i++)gate.tick(Uint8Array.from([20+i,50+i,100-i,160-i]),4500+i*180);assert.equal(gate.done,false);});
@@ -157,5 +165,6 @@ test('start offers image add and camera, then process with a blinking status and
  assert.match(app,/setView\('start'\);\s*$/);assert.match(app,/\$\('use-camera'\)\.onclick/);
  assert.match(app,/createImageBitmap|image-files/);assert.match(app,/processBatch/);
  assert.match(app,/audio:false/);assert.match(app,/#ffe000/);assert.match(app,/strokeRect/);assert.match(app,/fillText/);
+ assert.match(app,/call-list/);assert.match(app,/formatCallNumber/);assert.match(app,/resultCard/);
  assert.doesNotMatch(app,/setInterval\(tick/);
 });
