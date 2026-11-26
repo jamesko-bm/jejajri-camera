@@ -159,6 +159,19 @@ test('white call-number stickers split even without dark spine shadows',()=>{
  const shelf=analyzeShelf(canvas,()=>createCanvas(1,1));
  assert.equal(shelf.strips.length,8,JSON.stringify(shelf.strips.map(s=>s.bbox)));
 });
+test('label band sits above the lower 500 badges, not upper yellow covers',()=>{
+ const w=900,h=300,canvas=createCanvas(w,h),ctx=canvas.getContext('2d');
+ ctx.fillStyle='#6e5a44';ctx.fillRect(0,0,w,h);
+ ctx.fillStyle='#f0d24a';ctx.fillRect(0,20,w,110);
+ ctx.fillStyle='#efbf00';ctx.fillRect(10,232,w-20,48);
+ for(let i=0;i<10;i++){
+  ctx.fillStyle='#f4f4f4';ctx.fillRect(18+i*86,168,78,62);
+  ctx.fillStyle='#222';ctx.fillRect(28+i*86,180,50,12);ctx.fillRect(28+i*86,198,40,12);
+ }
+ const shelf=analyzeShelf(canvas,()=>createCanvas(1,1));
+ assert.ok(shelf.strips.length>=8,String(shelf.strips.length)+JSON.stringify(shelf.strips.map(s=>s.bbox)));
+ assert.ok(shelf.strips[0].bbox[1]>=120,String(shelf.strips[0].bbox));
+});
 test('start offers image add and camera, then process with a blinking status and yellow book borders',()=>{
  const html=readFileSync(new URL('./dist/index.html',import.meta.url),'utf8'),app=readFileSync(new URL('./dist/app.js',import.meta.url),'utf8');
  assert.match(html,/id=["']add-images"/);assert.match(html,/>이미지 추가</);
@@ -170,6 +183,6 @@ test('start offers image add and camera, then process with a blinking status and
  assert.match(app,/setView\('start'\);\s*$/);assert.match(app,/\$\('use-camera'\)\.onclick/);
  assert.match(app,/createImageBitmap|image-files/);assert.match(app,/processBatch/);
  assert.match(app,/audio:false/);assert.match(app,/#ffe000/);assert.match(app,/strokeRect/);assert.match(app,/fillText/);
- assert.match(app,/call-list/);assert.match(app,/formatCallNumber/);assert.match(app,/resultCard/);
+ assert.match(app,/call-list/);assert.match(app,/formatCallNumber/);assert.match(app,/resultCard/);assert.match(app,/call-count/);
  assert.doesNotMatch(app,/setInterval\(tick/);
 });

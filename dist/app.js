@@ -129,7 +129,8 @@ function callList(books){
 }
 function resultCard(snap,books){
  const card=document.createElement('section');card.className='result-card';
- card.append(resultCanvas(snap,books),callList(books));
+ const count=document.createElement('p');count.className='call-count';count.textContent=`인식 ${books.length}권`;
+ card.append(resultCanvas(snap,books),count,callList(books));
  return card;
 }
 async function processFrame(native,snap,token){
@@ -138,7 +139,7 @@ async function processFrame(native,snap,token){
  const engine=await getWorker();if(token!==job||document.hidden)return null;
  const image=snapshotContext.getImageData(0,0,snapshot.width,snapshot.height),encoded=snapshot.toDataURL('image/png');
  const prepare=(book,part,variant)=>prepareLine(nativeFrame,book,part,image.width,undefined,variant);
- prepare.tiles=()=>detectionTiles(nativeFrame,image.width);prepare.shelf=()=>analyzeShelf(snapshot,undefined,nativeFrame);
+ prepare.tiles=()=>detectionTiles(nativeFrame,image.width);prepare.shelf=()=>analyzeShelf(snapshot);
  const labels=await withTimeout(recognizeLabels(engine,encoded,image.width,image.height,()=>token===job&&!document.hidden,prepare));
  if(token!==job||document.hidden)return null;
  return refineBookEdges(labels,image);

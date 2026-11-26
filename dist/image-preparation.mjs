@@ -61,18 +61,19 @@ function labelBand(data,width,height){
   }
   rows.push({paper:paper/n,blue:blue/n,pink:pink/n,yellow:yellow/n,edge:edge/n});
  }
- let yellowPeak=0,yellowTop=height,paperPeak=0,paperAt=Math.round(height/2);
- for(let y=0;y<height;y++){
-  if(rows[y].yellow>yellowPeak)yellowPeak=rows[y].yellow;
-  if(rows[y].paper>paperPeak){paperPeak=rows[y].paper;paperAt=y;}
- }
+ let paperPeak=0;
+ for(let y=0;y<height;y++)if(rows[y].paper>paperPeak)paperPeak=rows[y].paper;
+ const lo=Math.round(height*0.42);
+ let yellowPeak=0,yellowAt=height;
+ for(let y=lo;y<height;y++)if(rows[y].yellow>yellowPeak)yellowPeak=rows[y].yellow;
+ for(let y=lo;y<height;y++)if(rows[y].yellow>yellowPeak*0.45)yellowAt=y;
  if(yellowPeak>0.08){
-  for(let y=0;y<height;y++)if(rows[y].yellow>yellowPeak*0.42){yellowTop=y;break;}
-  const bottom=Math.max(8,yellowTop-1),top=Math.max(0,yellowTop-Math.round(height*0.14));
-  let peak=0,at=Math.round((top+bottom)/2);
-  for(let y=top;y<bottom;y++)if(rows[y].paper>peak){peak=rows[y].paper;at=y;}
-  const half=Math.max(22,Math.round(height*0.04));
-  return [Math.max(top,at-half),bottom];
+  let top=yellowAt,bottom=yellowAt;
+  while(top>0&&rows[top].yellow>yellowPeak*0.32)top--;
+  while(bottom<height-1&&rows[bottom].yellow>yellowPeak*0.32)bottom++;
+  const badgeH=Math.max(10,bottom-top);
+  const labelH=Math.max(badgeH*1.45,Math.round(height*0.055),40);
+  return [Math.max(0,top-labelH),top];
  }
  let first=-1,last=0;
  for(let y=0;y<height;y++)if(rows[y].paper>Math.max(0.2,paperPeak*0.35)){if(first<0)first=y;last=y;}
@@ -115,12 +116,13 @@ function hysteresisRuns(score,width,on,off,minW){
 }
 
 function splitAtDips(spans,score){
+ const peak=Math.max(...score,0.2);
  const out=[];
  for(const [a,b] of spans){
-  const minW=Math.max(10,Math.round((b-a)*0.16));
+  const minW=Math.max(8,Math.round((b-a)*0.12));
   const cuts=[a];
   for(let x=a+minW;x<b-minW;x++){
-   if(score[x]+0.03<score[x-2]&&score[x]<=score[x+2]&&score[x]<0.3&&x-cuts[cuts.length-1]>=minW)cuts.push(x);
+   if(score[x]+0.02<score[x-2]&&score[x]<=score[x+2]&&score[x]<peak*0.72&&x-cuts[cuts.length-1]>=minW)cuts.push(x);
   }
   cuts.push(b);
   for(let i=0;i<cuts.length-1;i++)if(cuts[i+1]-cuts[i]>=minW)out.push([cuts[i],cuts[i+1]]);
@@ -129,17 +131,19 @@ function splitAtDips(spans,score){
 }
 
 function splitWideSpans(spans,score){
+ if(!spans.length)return spans;
+ const width=score.length;
+ const seed=spans.map(([a,b])=>b-a).sort((a,b)=>a-b);
+ const typical=seed[Math.max(0,Math.floor(seed.length*0.3))]||seed[0];
+ const cap=Math.max(typical*1.55,Math.round(width/20),40);
+ const minW=Math.max(10,Math.round(Math.min(typical,cap)*0.38));
  let out=spans;
- for(let pass=0;pass<3;pass++){
-  if(out.length<2)return out;
-  const widths=out.map(([a,b])=>b-a).sort((a,b)=>a-b);
-  const typical=widths[Math.max(0,Math.floor(widths.length*0.35))]||widths[0];
-  const minW=Math.max(8,Math.round(typical*0.4));
+ for(let pass=0;pass<6;pass++){
   const next=[];
   let did=false;
   for(const [a,b] of out){
-   if(b-a<=typical*1.5){next.push([a,b]);continue;}
-   const lo=a+Math.round((b-a)*0.2),hi=a+Math.round((b-a)*0.8);
+   if(b-a<=cap){next.push([a,b]);continue;}
+   const lo=a+Math.round((b-a)*0.18),hi=a+Math.round((b-a)*0.82);
    let best=lo,bestV=1;
    for(let x=lo;x<hi;x++)if(score[x]<=bestV){bestV=score[x];best=x;}
    if(best-a>=minW&&b-best>=minW){next.push([a,best],[best,b]);did=true;}
@@ -169,12 +173,22 @@ function mergeBrokenStickers(spans,data,width,y0,y1){
  }
  return out;
 }
+function rejoinThin(spans,width){
+ if(spans.length<3)return spans;
+ const guess=Math.round(width/Math.min(22,Math.max(8,spans.length)));
+ const out=[];
+ for(const [a,b] of spans){
+  if(out.length&&b-a<guess*0.52){out[out.length-1][1]=b;continue;}
+  out.push([a,b]);
+ }
+ return out;
+}
 function stickerSpans(data,width,y0,y1){
  const score=columnPaper(data,width,y0,y1);
  const max=Math.max(...score,0);
  if(max<0.12)return [];
  const on=Math.max(0.22,max*0.38),off=Math.max(0.1,on*0.55),minW=Math.max(8,Math.round(width*0.006));
- return mergeBrokenStickers(splitWideSpans(splitAtDips(hysteresisRuns(score,width,on,off,minW),score),score),data,width,y0,y1);
+ return rejoinThin(mergeBrokenStickers(splitWideSpans(splitAtDips(hysteresisRuns(score,width,on,off,minW),score),score),data,width,y0,y1),width);
 }
 
 function shelfSpans(data,width,y0,y1){
@@ -302,7 +316,8 @@ export function analyzeShelf(source,makeCanvas,detail=null){
  const {data}=pctx.getImageData(0,0,width,height);
  const [y0,y1]=labelBand(data,width,height);
  const stickers=stickerSpans(data,width,y0,y1),shadows=shelfSpans(data,width,y0,y1);
- const spans=(stickers.length>=3&&stickers.length>=shadows.length?stickers:shadows.length>=stickers.length?shadows:stickers).map(([a,b])=>[Math.max(0,a-2),Math.min(width,b+2)]);
+ const chosen=stickers.length>=3?stickers:shadows.length>=2?shadows:stickers;
+ const spans=chosen.map(([a,b])=>[Math.max(0,a-2),Math.min(width,b+2)]);
  if(spans.length<2)return {band:null,strips:[]};
  const hi=detail&&detail.width>=source.width?detail:source,ratio=hi.width/width;
  const scale=3,x0=spans[0][0],x1=spans[spans.length-1][1],bw=x1-x0;

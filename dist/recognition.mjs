@@ -28,7 +28,7 @@ function reconcileClass(a,b){
 }
 
 function mergeShelf(scene,strips){
- const items=strips.filter(s=>s.classification||s.author).map(s=>({classification:s.classification||'',author:s.author||'',volume:s.volume||'',copy:s.copy||'',confidence:s.confidence||0,bbox:s.bbox,uncertain:!!s.uncertain||!s.classification||!s.author}));
+ const items=strips.map(s=>({classification:s.classification||'',author:s.author||'',volume:s.volume||'',copy:s.copy||'',confidence:s.confidence||0,bbox:s.bbox,uncertain:!!s.uncertain||!s.classification||!s.author}));
  for(const book of scene){
   const cx=(book.bbox[0]+book.bbox[2])/2;
   const hit=items.find(s=>cx>=s.bbox[0]&&cx<=s.bbox[2]);
@@ -43,22 +43,14 @@ function mergeShelf(scene,strips){
   hit.uncertain=hit.uncertain||!hit.classification||!hit.author;
  }
  items.sort((a,b)=>a.bbox[0]-b.bbox[0]);
- const kept=items.flatMap(s=>{const ok=/^\d{3}(?:\.\d{1,4})?$/.test(s.classification);if(!ok&&!s.author)return [];return [{...s,classification:ok?s.classification:'',uncertain:s.uncertain||!ok}];});
- if(kept.length<2)return [];
- return snapShelfAuthors(snapShelfClasses(kept)).map((s,i)=>({id:`V${String(i+1).padStart(2,'0')}`,classification:s.classification,author:s.author||'',volume:s.volume||'',copy:s.copy||'',bbox:s.bbox.map(Math.round),labelBox:s.bbox.map(Math.round),confidence:s.confidence||0,confirmed:false,uncertain:!!s.uncertain||!isFullClass(s.classification)||!s.author}));
+ if(!items.length)return [];
+ return snapShelfAuthors(snapShelfClasses(items)).map((s,i)=>({id:`V${String(i+1).padStart(2,'0')}`,classification:s.classification,author:s.author||'',volume:s.volume||'',copy:s.copy||'',bbox:s.bbox.map(Math.round),labelBox:s.bbox.map(Math.round),confidence:s.confidence||0,confirmed:false,uncertain:!!s.uncertain||!isFullClass(s.classification)||!s.author}));
 }
 
 async function recognizeShelf(engine,prepare,width,height,isCurrent){
  const layout=prepare.shelf();
  if(!layout?.strips?.length)return [];
- let books=[],words=[];
- if(layout.band){
-  await engine.setParameters({tessedit_pageseg_mode:'11',tessedit_char_whitelist:''});
-  if(!isCurrent())return [];
-  const {data:band}=await engine.recognize(layout.band.image,{}, {text:true,blocks:true});
-  words=(band.words||[]).map(layout.band.mapWord);
-  books=readLabels(words,width,height);
- }
+ const books=[],words=[];
  const strips=[];
  for(const strip of layout.strips){
   if(!isCurrent())return [];
@@ -88,25 +80,16 @@ async function recognizeShelf(engine,prepare,width,height,isCurrent){
   }
   if(!isCurrent())return [];
   if(lines[1]){
-   const authorLine=preferFields(asAuthor(await readLine(lines[1],'')),asAuthor(await readLine(lines[1],AUTHOR_WHITELIST)));
+   const authorLine=asAuthor(await readLine(lines[1],''));
    topAuthor=authorLine.author;
-   parsed=preferFields(parsed,asAuthor(authorLine));
+   parsed=preferFields(parsed,authorLine);
    const circled=circleAuthor(authorLine.author);
    if(circled)parsed.author=circled;
   }
   if(!parsed.author)await take(gray[1],'','author');
-  if(!parsed.author)await take(invert[1],'','author');
   if(!parsed.author)await take(lines[1],'','author','8');
-  const VOL_WL='0123456789.vVcC권 ';
-  for(let i=2;i<Math.max(lines.length,gray.length);i++){
-   parsed=preferFields(parsed,asAuthor(await readLine(lines[i],'')));
-   parsed=preferFields(parsed,asAuthor(await readLine(gray[i],VOL_WL)));
-  }
+  for(let i=2;i<lines.length;i++)parsed=preferFields(parsed,asAuthor(await readLine(lines[i],'')));
   if(!parsed.author&&topAuthor&&!topWasClass)parsed=preferFields(parsed,{classification:'',author:topAuthor,volume:'',copy:''});
-  if(lines[0]&&!parsed.author&&!topWasClass){
-   if(!isCurrent())return [];
-   parsed=preferFields(parsed,asAuthor(await readLine(lines[0],AUTHOR_WHITELIST)));
-  }
   if(lines[1]&&!isFullClass(parsed.classification)){
    if(!isCurrent())return [];
    parsed=preferFields(parsed,await readLine(lines[1],DIGIT_WHITELIST));
@@ -119,13 +102,6 @@ async function recognizeShelf(engine,prepare,width,height,isCurrent){
   parsed=preferFields(parsed,whole);
   const circled=circleAuthor(data.text||'');
   if(circled)parsed.author=preferAuthor(parsed.author,circled)||circled;
-  const local=words.filter(w=>w.bbox&&(w.bbox.x0+w.bbox.x1)/2>=strip.bbox[0]&&(w.bbox.x0+w.bbox.x1)/2<=strip.bbox[2]).sort((a,b)=>a.bbox.y0-b.bbox.y0||a.bbox.x0-b.bbox.x0).map(w=>w.text).join(' ');
-  const fromBand=parseShelfText(local);
-  if(!isFullClass(parsed.classification)&&isFullClass(fromBand.classification))parsed.classification=fromBand.classification;
-  else parsed.classification=pickClass(parsed.classification,fromBand.classification)||parsed.classification;
-  if(!parsed.author&&fromBand.author)parsed.author=fromBand.author;
-  if(!parsed.volume&&fromBand.volume)parsed.volume=fromBand.volume;
-  if(!parsed.copy&&fromBand.copy)parsed.copy=fromBand.copy;
   strips.push({classification:parsed.classification,author:parsed.author,volume:parsed.volume||'',copy:parsed.copy||'',uncertain:!isFullClass(parsed.classification)||!parsed.author,bbox:strip.bbox,confidence});
  }
  return mergeShelf(books,strips);
@@ -140,21 +116,7 @@ export async function recognizeLabels(engine,encoded,width,height,isCurrent=()=>
  if(prepare?.shelf){
   const shelf=await recognizeShelf(engine,prepare,width,height,isCurrent);
   if(!isCurrent())return [];
-  if(shelf.length){
-  await engine.setParameters({tessedit_pageseg_mode:'11',tessedit_char_whitelist:''});
-  const {data:sceneData}=await engine.recognize(encoded,{}, {text:true,blocks:true});
-  for(const book of readLabels(sceneData.words||[],width,height)){
-   const box=book.labelBox||book.bbox,cx=(box[0]+box[2])/2;
-   const hit=shelf.find(s=>cx>=s.bbox[0]&&cx<=s.bbox[2]);
-   if(!hit)continue;
-   if(!isFullClass(hit.classification))hit.classification=pickClass(hit.classification,book.classification)||hit.classification||book.classification||'';
-   if(!hit.author&&book.author)hit.author=book.author;
-   if(!hit.volume&&book.volume)hit.volume=book.volume;
-   if(!hit.copy&&book.copy)hit.copy=book.copy;
-   hit.uncertain=!isFullClass(hit.classification)||!hit.author;
-  }
-  if(usableShelf(shelf))return shelf;
- }
+  if(usableShelf(shelf)||shelf.length)return shelf;
  }
  await engine.setParameters({tessedit_pageseg_mode:'11',tessedit_char_whitelist:''});
  const {data}=await engine.recognize(encoded,{}, {text:true,blocks:true});

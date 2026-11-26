@@ -19,6 +19,7 @@ header{position:absolute;top:0;left:0;right:0;display:flex;align-items:center;ju
 .results{position:absolute;inset:0;z-index:3;overflow:auto;display:flex;flex-direction:column;gap:16px;padding:calc(72px + env(safe-area-inset-top)) 12px calc(140px + env(safe-area-inset-bottom));-webkit-overflow-scrolling:touch}
 .result-card{display:flex;flex-direction:column;gap:8px;flex:0 0 auto}
 .results canvas{position:relative;width:100%;height:auto;border-radius:12px;background:#0b1a14}
+.call-count{margin:0;padding:8px 12px 0;font-size:15px;font-weight:800;color:#ffe000}
 .call-list{margin:0;padding:8px 10px;list-style:decimal inside;background:#0b1a14;border-radius:12px;font-size:16px;font-weight:700;line-height:1.55;letter-spacing:-.2px}
 .call-list li{padding:7px 8px;border-radius:8px;color:#f3f7f4}
 .call-list li.flagged{background:#ffe000;color:#1c1a08}
