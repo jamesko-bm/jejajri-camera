@@ -56,19 +56,6 @@ function seedBox(book){
  return box.map(v=>Math.round(Number(v)||0));
 }
 
-function rowProfile(data,width,y,x0,x1){
- let sum=0,sum2=0,sat=0,edge=0,n=0;
- x0=Math.max(0,Math.floor(x0));x1=Math.min(width,Math.ceil(x1));
- if(x1<=x0||y<0)return {mean:0,variance:0,sat:0,edge:0};
- for(let x=x0;x<x1;x++){
-  const i=(y*width+x)*4,r=data[i],g=data[i+1],b=data[i+2],v=luma(data,i);
-  sum+=v;sum2+=v*v;n++;sat+=Math.max(r,g,b)-Math.min(r,g,b);
-  if(x>x0){const p=i-4;edge+=Math.abs(r-data[p])+Math.abs(g-data[p+1])+Math.abs(b-data[p+2]);}
- }
- const mean=sum/n;
- return {mean,variance:sum2/n-mean*mean,sat:sat/n,edge:edge/n};
-}
-
 function colProfile(data,width,height,x,y0,y1){
  let sum=0,sum2=0,edge=0,n=0;
  y0=Math.max(0,Math.floor(y0));y1=Math.min(height,Math.ceil(y1));
@@ -80,16 +67,6 @@ function colProfile(data,width,height,x,y0,y1){
  }
  const mean=sum/n;
  return {mean,variance:sum2/n-mean*mean,edge:edge/n};
-}
-
-function vertJump(data,width,y,x0,x1){
- if(y<=0)return 0;
- let d=0,n=0;
- for(let x=Math.max(0,x0);x<Math.min(width,x1);x+=2){
-  const a=(y*width+x)*4,b=((y-1)*width+x)*4;
-  d+=Math.abs(data[a]-data[b])+Math.abs(data[a+1]-data[b+1])+Math.abs(data[a+2]-data[b+2]);n++;
- }
- return d/Math.max(1,n);
 }
 
 function verticalEdges(data,width,y0,y1){
@@ -113,36 +90,73 @@ function peakEdge(edges,from,to){
  return best;
 }
 
-function sameTone(a,b){return Math.abs(a.mean-b.mean)<34;}
+function shelfBand(data,width,height,seeds){
+ const labelTop=Math.min(...seeds.map(s=>s[1])),labelBottom=Math.max(...seeds.map(s=>s[3]));
+ const energy=new Float64Array(height);
+ for(let y=0;y<height;y++){
+  let e=0,n=0;
+  for(let x=2;x<width-2;x+=2){
+   const i=(y*width+x)*4,l=(y*width+x-2)*4,r=(y*width+x+2)*4;
+   e+=Math.abs(data[i]-data[l])+Math.abs(data[i+1]-data[l+1])+Math.abs(data[i+2]-data[l+2]);
+   e+=Math.abs(data[i]-data[r])+Math.abs(data[i+1]-data[r+1])+Math.abs(data[i+2]-data[r+2]);
+   n++;
+  }
+  energy[y]=e/Math.max(1,n);
+ }
+ const smooth=new Float64Array(height);
+ for(let y=0;y<height;y++){
+  let s=0,n=0;
+  for(let k=-6;k<=6;k++){const i=y+k;if(i>=0&&i<height){s+=energy[i];n++;}}
+  smooth[y]=s/n;
+ }
+ let peak=0;
+ for(let y=Math.max(0,labelTop-8);y<Math.min(height,labelBottom+24);y++)if(smooth[y]>peak)peak=smooth[y];
+ const thresh=Math.max(5,peak*.22);
+ let top=Math.max(0,labelTop);
+ while(top>1&&smooth[top]>=thresh)top--;
+ if(smooth[top]<thresh)top++;
+ let bottom=Math.min(height-1,labelBottom);
+ while(bottom<height-2&&smooth[bottom]>=thresh)bottom++;
+ if(smooth[bottom]<thresh)bottom--;
+ const horiz=new Float64Array(height);
+ for(let y=1;y<height;y++){
+  let d=0,n=0;
+  for(let x=0;x<width;x+=3){
+   const a=(y*width+x)*4,b=((y-1)*width+x)*4;
+   d+=Math.abs(data[a]-data[b])+Math.abs(data[a+1]-data[b+1])+Math.abs(data[a+2]-data[b+2]);n++;
+  }
+  horiz[y]=d/n;
+ }
+ const snap=(around,lo,hi)=>{
+  let best=around,score=horiz[around]||0;
+  for(let y=Math.max(1,lo);y<=Math.min(height-1,hi);y++)if(horiz[y]>score){score=horiz[y];best=y;}
+  return best;
+ };
+ const window=Math.max(10,Math.round(height*.07));
+ const topSnap=snap(top,top-window,top+4),botSnap=snap(bottom,bottom-4,bottom+window);
+ if(horiz[topSnap]>(horiz[top]||0)*1.12)top=topSnap;
+ if(horiz[botSnap]>(horiz[bottom]||0)*1.12)bottom=botSnap;
+ const labelH=Math.max(12,labelBottom-labelTop);
+ if(bottom-top<labelH*3.5){
+  const mid=(labelTop+labelBottom)/2,need=Math.max(labelH*7,Math.round(height*.55));
+  top=Math.max(1,Math.round(mid-need*.62));
+  bottom=Math.min(height-1,Math.round(mid+need*.38));
+ }
+ return [Math.round(Math.min(top,labelTop)),Math.round(Math.max(bottom,labelBottom))];
+}
 
 function expandX(data,width,height,start,limit,y0,y1,dir){
  const interior=colProfile(data,width,height,start,y0,y1);
- if(interior.variance<16&&interior.edge<8&&interior.mean<22)return start;
+ if(interior.edge<4&&interior.variance<12&&interior.mean<22)return start;
  let x=start,last=start;
  for(let step=0;step<Math.abs(limit-start);step++){
   const next=x+dir;
   if(next<=1||next>=width-2)break;
   const c=colProfile(data,width,height,next,y0,y1);
-  const gap=c.edge>Math.max(18,interior.edge*1.5)&&c.variance<Math.max(30,interior.variance*.55);
-  const empty=!sameTone(c,interior)&&c.variance<24&&c.edge<10;
-  if(gap||empty)break;
+  const empty=c.edge<Math.max(3,interior.edge*.22)&&c.variance<18&&Math.abs(c.mean-interior.mean)>24;
+  const gap=c.edge>Math.max(16,interior.edge*1.8)&&c.variance<Math.max(24,interior.variance*.5);
+  if(empty||gap)break;
   last=next;x=next;
- }
- return last;
-}
-
-function expandY(data,width,height,left,right,start,limit,dir,label){
- if(label.variance<16&&label.sat<12&&label.mean<22)return start;
- let y=start,last=start;
- for(let step=0;step<Math.abs(limit-start);step++){
-  const next=y+dir;
-  if(next<=1||next>=height-2)break;
-  const jump=vertJump(data,width,next,left,right);
-  const row=rowProfile(data,width,next,left,right);
-  const shelf=jump>Math.max(42,label.sat*1.4)&&Math.abs(next-start)>6;
-  const empty=!sameTone(row,label)&&row.variance<22&&row.sat<14;
-  if(shelf||empty)break;
-  last=next;y=next;
  }
  return last;
 }
@@ -151,28 +165,21 @@ export function refineBookEdges(books,image){
  if(!books.length)return books;
  const {data,width,height}=image;
  const seeds=books.map(seedBox);
- const bandTop=Math.max(0,Math.min(...seeds.map(s=>s[1]))-8);
- const bandBottom=Math.min(height,Math.max(...seeds.map(s=>s[3]))+24);
- const edges=verticalEdges(data,width,bandTop,bandBottom);
+ const [shelfTop,shelfBottom]=shelfBand(data,width,height,seeds);
+ const edges=verticalEdges(data,width,shelfTop,shelfBottom);
  const lefts=seeds.map(s=>s[0]);
  const rights=seeds.map(s=>s[2]);
  for(let i=1;i<books.length;i++){
   const split=peakEdge(edges,rights[i-1],lefts[i]);
   rights[i-1]=split;lefts[i]=split;
  }
- const labelY0=Math.min(...seeds.map(s=>s[1])),labelY1=Math.max(...seeds.map(s=>s[3]));
- const firstW=Math.max(18,(rights[0]-lefts[0])*2.2);
- const lastW=Math.max(18,(rights[rights.length-1]-lefts[lefts.length-1])*2.2);
- lefts[0]=expandX(data,width,height,lefts[0],Math.max(2,lefts[0]-firstW),labelY0,labelY1,-1);
- rights[rights.length-1]=expandX(data,width,height,rights[rights.length-1],Math.min(width-2,rights[rights.length-1]+lastW),labelY0,labelY1,1);
+ const firstW=Math.max(24,(rights[0]-lefts[0])*2.5);
+ const lastW=Math.max(24,(rights[rights.length-1]-lefts[lefts.length-1])*2.5);
+ lefts[0]=expandX(data,width,height,lefts[0],Math.max(2,lefts[0]-firstW),shelfTop,shelfBottom,-1);
+ rights[rights.length-1]=expandX(data,width,height,rights[rights.length-1],Math.min(width-2,rights[rights.length-1]+lastW),shelfTop,shelfBottom,1);
  return books.map((book,i)=>{
-  const seed=seeds[i];
   const left=Math.max(0,Math.min(lefts[i],rights[i]-2));
   const right=Math.min(width,Math.max(left+2,rights[i]));
-  const label=rowProfile(data,width,Math.max(0,Math.min(height-1,Math.round((seed[1]+seed[3])/2))),left,right);
-  const maxH=Math.max(seed[3]-seed[1],right-left)*10;
-  const top=expandY(data,width,height,left,right,seed[1],Math.max(1,seed[3]-maxH),-1,label);
-  const bottom=expandY(data,width,height,left,right,seed[3],Math.min(height-1,seed[1]+maxH),1,label);
-  return {...book,bbox:[Math.round(left),Math.round(Math.min(top,seed[1])),Math.round(right),Math.round(Math.max(bottom,seed[3]))]};
+  return {...book,bbox:[Math.round(left),shelfTop,Math.round(right),shelfBottom]};
  });
 }
