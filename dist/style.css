@@ -38,7 +38,11 @@ footer span{font-size:12px;color:#c7d6cc}
 .error-actions{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
 .error button{background:#e3f0e6;color:#15382a;border:0;border-radius:8px;padding:11px 18px;font-size:14px;font-weight:600;cursor:pointer}
 @keyframes step-blink{50%{opacity:.25}}
-#hint.tick{animation:tick .45s ease-out}
-@keyframes tick{0%{opacity:.15;color:#ffe000}100%{opacity:1}}
-@media(prefers-reduced-motion:reduce){.processing,#hint.tick{animation:none}}
+.progress{position:relative;width:min(440px,88vw);height:32px;border-radius:16px;background:#0b1a14d9;border:1px solid #ffe00099;overflow:hidden;box-shadow:0 4px 14px #0006}
+.progress-fill{position:absolute;top:0;bottom:0;left:0;width:0;background:linear-gradient(90deg,#b89a00,#ffe000)}
+.progress-text{position:relative;display:inline-block;line-height:32px;font-size:14px;font-weight:800;color:#fff;text-shadow:0 1px 3px #000,0 0 6px #000}
+/* Recognition can stall animations at their first frame, so that frame must stay readable. */
+.progress-text.tick{animation:tick .45s ease-out}
+@keyframes tick{0%{transform:scale(1.12)}100%{transform:none}}
+@media(prefers-reduced-motion:reduce){.processing,.progress-text.tick{animation:none}}
 @media(max-height:500px){header{padding-top:12px}footer{padding-bottom:12px}.processing{font-size:22px}.welcome p{font-size:15px}}

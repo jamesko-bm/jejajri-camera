@@ -33,6 +33,7 @@ function setView(next){
  overlay.hidden=next==='start'||next==='result';
  $('live-label').textContent=next==='camera'?'카메라':next==='result'?'결과':next==='processing'?'처리':'선택';
  showProcessing(next==='processing');
+ $('progress').hidden=next!=='processing';
 }
 function paintBoxes(ctx,width,height,books){
  const flagged=new Set(decreasingBooks(books).flagged);
@@ -172,10 +173,32 @@ function resultCard(snap,books){
 function paint(){
  return new Promise(resolve=>{let done=false;const go=()=>{if(!done){done=true;resolve();}};requestAnimationFrame(()=>setTimeout(go,0));setTimeout(go,100);});
 }
-function progress(text){
- const el=$('hint');
- if(el.textContent===text)return;
- hint(text);el.classList.remove('tick');void el.offsetWidth;el.classList.add('tick');
+// Overall progress: finished pages plus the share of the current page. Within a
+// page, finding and reading lines takes about as long as parsing the books.
+const STAGE={lines:[.05,.5],books:[.55,.45]};
+let meter=null;
+function startMeter(pages){meter={pages,page:0,share:0,since:0,from:0};drawMeter();}
+function meterAt(page,stage=null,done=0,total=1){
+ if(!meter)return;
+ meter.page=page;
+ meter.share=stage?STAGE[stage][0]+STAGE[stage][1]*Math.min(1,done/Math.max(1,total)):0;
+ // Time is measured from the first reported step so the model download does not skew it.
+ if(stage&&!meter.since){meter.since=performance.now();meter.from=fraction();}
+ drawMeter();
+}
+function fraction(){return meter?Math.min(1,(meter.page+meter.share)/meter.pages):0;}
+function drawMeter(){
+ const bar=$('progress'),f=fraction(),pct=Math.floor(f*100);
+ let text=`${Math.min(meter.pages,meter.page+1)}/${meter.pages}장 · ${pct}%`;
+ if(meter.since&&f-meter.from>.04&&f<1){
+  const left=Math.max(1,Math.round((performance.now()-meter.since)/(f-meter.from)*(1-f)/1000));
+  text+=` · 약 ${left>=60?`${Math.floor(left/60)}분 ${left%60}초`:`${left}초`} 남음`;
+ }
+ bar.querySelector('.progress-fill').style.width=`${f*100}%`;
+ bar.setAttribute('aria-valuenow',String(pct));
+ const label=bar.querySelector('.progress-text');
+ if(label.textContent===text)return;
+ label.textContent=text;label.classList.remove('tick');void label.offsetWidth;label.classList.add('tick');
 }
 async function processFrame(native,snap,token,onProgress){
  nativeFrame.width=native.width;nativeFrame.height=native.height;nativeContext.drawImage(native,0,0);
@@ -195,23 +218,24 @@ async function processFrame(native,snap,token,onProgress){
 }
 async function processBatch(frames){
  if(!frames.length||busy)return;
- const token=++job;busy=true;stopCamera();setView('processing');hint('찍은 사진을 읽고 있습니다.');
+ const token=++job;busy=true;stopCamera();startMeter(frames.length);setView('processing');hint('찍은 사진을 읽고 있습니다.');
  $('results').replaceChildren();
  let flagged=0,readable=0;
  try{
   for(let i=0;i<frames.length;i++){
    if(token!==job||document.hidden)return;
-   const page=`${i+1}/${frames.length}장`;
-   progress(i||paddlePromise?`${page} 읽는 중`:`인식 모델(약 18MB)을 내려받고 ${page} 읽는 중`);
+   hint(i||paddlePromise?'찍은 사진을 읽고 있습니다.':'인식 모델(약 18MB)을 내려받고 사진을 읽고 있습니다.');
+   meterAt(i);
    showPreview(frames[i].snapshot);
    await paint();
    let shown=0;
    const onProgress=async(stage,done,total)=>{
     if(performance.now()-shown<500)return;
-    progress(stage==='lines'?`${page} 읽는 중 · 라벨 찾기 ${Math.round(done/total*100)}%`:`${page} 읽는 중 · 책 ${done+1}/${total}권`);
+    meterAt(i,stage,done,total);
     await paint();shown=performance.now();
    };
    const books=await processFrame(frames[i].native,frames[i].snapshot,token,onProgress);
+   meterAt(i+1);
    if(token!==job||books==null)return;
    const order=decreasingBooks(books);
    if(order.flagged.length)flagged+=order.flagged.length;
