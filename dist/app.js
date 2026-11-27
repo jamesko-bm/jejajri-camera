@@ -172,7 +172,11 @@ function resultCard(snap,books){
 function paint(){
  return new Promise(resolve=>{let done=false;const go=()=>{if(!done){done=true;resolve();}};requestAnimationFrame(()=>setTimeout(go,0));setTimeout(go,100);});
 }
-function progress(text){hint(text);$('processing').textContent=`[처리 중] ${text}`;}
+function progress(text){
+ const el=$('hint');
+ if(el.textContent===text)return;
+ hint(text);el.classList.remove('tick');void el.offsetWidth;el.classList.add('tick');
+}
 async function processFrame(native,snap,token,onProgress){
  nativeFrame.width=native.width;nativeFrame.height=native.height;nativeContext.drawImage(native,0,0);
  snapshot.width=snap.width;snapshot.height=snap.height;snapshotContext.drawImage(snap,0,0);
@@ -203,7 +207,7 @@ async function processBatch(frames){
    await paint();
    let shown=0;
    const onProgress=async(stage,done,total)=>{
-    if(performance.now()-shown<250)return;
+    if(performance.now()-shown<500)return;
     progress(stage==='lines'?`${page} 읽는 중 · 라벨 찾기 ${Math.round(done/total*100)}%`:`${page} 읽는 중 · 책 ${done+1}/${total}권`);
     await paint();shown=performance.now();
    };

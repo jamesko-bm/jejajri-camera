@@ -38,5 +38,7 @@ footer span{font-size:12px;color:#c7d6cc}
 .error-actions{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
 .error button{background:#e3f0e6;color:#15382a;border:0;border-radius:8px;padding:11px 18px;font-size:14px;font-weight:600;cursor:pointer}
 @keyframes step-blink{50%{opacity:.25}}
-@media(prefers-reduced-motion:reduce){.processing{animation:none}}
+#hint.tick{animation:tick .45s ease-out}
+@keyframes tick{0%{opacity:.15;color:#ffe000}100%{opacity:1}}
+@media(prefers-reduced-motion:reduce){.processing,#hint.tick{animation:none}}
 @media(max-height:500px){header{padding-top:12px}footer{padding-bottom:12px}.processing{font-size:22px}.welcome p{font-size:15px}}
