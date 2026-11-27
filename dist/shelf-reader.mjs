@@ -233,7 +233,8 @@ function fillSurnames(books){
  });
 }
 
-export async function readShelfLabels(reader,photo,{band=null,templates=null,isCurrent=()=>true}={}){
+// onProgress(stage,done,total) is awaited so a caller on the UI thread can repaint.
+export async function readShelfLabels(reader,photo,{band=null,templates=null,isCurrent=()=>true,onProgress=null}={}){
  let region={x0:0,y0:0,x1:photo.width,y1:photo.height};
  if(band){
   const h=band[1]-band[0];
@@ -249,8 +250,9 @@ export async function readShelfLabels(reader,photo,{band=null,templates=null,isC
  const lines=[];
  const readAll=async list=>{
   lines.length=0;
-  for(const b of list){
+  for(const [n,b] of list.entries()){
    if(!isCurrent())return;
+   await onProgress?.('lines',n,list.length);
    const h=b.y1-b.y0,w=b.x1-b.x0;
    if(h<6||w<6||w>h*14)continue;
    const res=await reader.recognize(cropPixels(photo,b.x0,b.y0,b.x1,b.y1));
@@ -308,8 +310,9 @@ export async function readShelfLabels(reader,photo,{band=null,templates=null,isC
   }
  }
  const out=[];
- for(const book of books){
+ for(const [n,book] of books.entries()){
   if(!isCurrent())return [];
+  await onProgress?.('books',n,books.length);
   book.below=joinRows(book.below);
   book.below.sort((p,q)=>p.y0-q.y0);
   let author='',volume='',copy='',raw=[];

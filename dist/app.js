@@ -125,12 +125,12 @@ function getPaddle(){
  paddlePromise.catch(()=>{paddlePromise=null;});
  return paddlePromise;
 }
-async function readWithPaddle(native,image,isCurrent){
+async function readWithPaddle(native,image,isCurrent,onProgress){
  const {reader,templates}=await withTimeout(getPaddle());
  if(!isCurrent())return null;
  const ratio=native.width/snapshot.width,band=inspectShelf(snapshot).band;
  const photo=nativeContext.getImageData(0,0,native.width,native.height);
- const found=await readShelfLabels(reader,photo,{band:band&&band.map(v=>v*ratio),templates,isCurrent});
+ const found=await readShelfLabels(reader,photo,{band:band&&band.map(v=>v*ratio),templates,isCurrent,onProgress});
  if(!isCurrent())return null;
  return found.map((b,i)=>{
   const box=b.box.map(v=>Math.round(v/ratio));
@@ -168,12 +168,17 @@ function resultCard(snap,books){
  card.append(resultCanvas(snap,books),count,callList(books));
  return card;
 }
-async function processFrame(native,snap,token){
+// Recognition keeps the main thread busy; give the browser a frame to show progress.
+function paint(){
+ return new Promise(resolve=>{let done=false;const go=()=>{if(!done){done=true;resolve();}};requestAnimationFrame(()=>setTimeout(go,0));setTimeout(go,100);});
+}
+function progress(text){hint(text);$('processing').textContent=`[처리 중] ${text}`;}
+async function processFrame(native,snap,token,onProgress){
  nativeFrame.width=native.width;nativeFrame.height=native.height;nativeContext.drawImage(native,0,0);
  snapshot.width=snap.width;snapshot.height=snap.height;snapshotContext.drawImage(snap,0,0);
  const isCurrent=()=>token===job&&!document.hidden;
  const image=snapshotContext.getImageData(0,0,snapshot.width,snapshot.height);
- const paddle=await readWithPaddle(native,image,isCurrent).catch(error=>{console.warn('PaddleOCR',error);return [];});
+ const paddle=await readWithPaddle(native,image,isCurrent,onProgress).catch(error=>{console.warn('PaddleOCR',error);return [];});
  if(!isCurrent())return null;
  if(paddle&&paddle.length>=2)return refineBookEdges(paddle,image);
  const engine=await getWorker();if(!isCurrent())return null;
@@ -192,9 +197,17 @@ async function processBatch(frames){
  try{
   for(let i=0;i<frames.length;i++){
    if(token!==job||document.hidden)return;
-   hint(i||paddlePromise?`${i+1}/${frames.length}장 읽고 있습니다.`:`인식 모델(약 18MB)을 내려받고 ${i+1}/${frames.length}장을 읽고 있습니다.`);
+   const page=`${i+1}/${frames.length}장`;
+   progress(i||paddlePromise?`${page} 읽는 중`:`인식 모델(약 18MB)을 내려받고 ${page} 읽는 중`);
    showPreview(frames[i].snapshot);
-   const books=await processFrame(frames[i].native,frames[i].snapshot,token);
+   await paint();
+   let shown=0;
+   const onProgress=async(stage,done,total)=>{
+    if(performance.now()-shown<250)return;
+    progress(stage==='lines'?`${page} 읽는 중 · 라벨 찾기 ${Math.round(done/total*100)}%`:`${page} 읽는 중 · 책 ${done+1}/${total}권`);
+    await paint();shown=performance.now();
+   };
+   const books=await processFrame(frames[i].native,frames[i].snapshot,token,onProgress);
    if(token!==job||books==null)return;
    const order=decreasingBooks(books);
    if(order.flagged.length)flagged+=order.flagged.length;
