@@ -63,7 +63,9 @@ function paintBoxes(ctx,width,height,books){
 }
 function canvasesFromSource(source){
  const w=source.videoWidth||source.naturalWidth||source.width,h=source.videoHeight||source.naturalHeight||source.height;
- const native=document.createElement('canvas');native.width=w;native.height=h;native.getContext('2d').drawImage(source,0,0,w,h);
+ // 50MP sensors would need hundreds of MB of pixels; 6000px keeps label text sharp.
+ const keep=Math.min(1,6000/Math.max(w,h));
+ const native=document.createElement('canvas');native.width=Math.round(w*keep);native.height=Math.round(h*keep);native.getContext('2d').drawImage(source,0,0,native.width,native.height);
  const scale=Math.min(1,3600/Math.max(w,h));
  const snap=document.createElement('canvas');snap.width=Math.max(1,Math.round(w*scale));snap.height=Math.max(1,Math.round(h*scale));
  snap.getContext('2d',{willReadFrequently:true}).drawImage(source,0,0,snap.width,snap.height);
@@ -232,15 +234,41 @@ async function startCamera(){
   if(!window.isSecureContext||!navigator.mediaDevices?.getUserMedia)throw Object.assign(Error('HTTPS 주소의 Chrome 또는 Safari에서 열어 주세요.'),{name:'SecurityError'});
   const opened=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:'environment'},width:{ideal:3840},height:{ideal:2160}}});
   if(closed){opened.getTracks().forEach(t=>t.stop());return;}
-  stream=opened;await improveCameraFocus(stream.getVideoTracks()[0]);video.srcObject=stream;video.hidden=false;await video.play();
+  stream=opened;await useHighestResolution(stream.getVideoTracks()[0]);await improveCameraFocus(stream.getVideoTracks()[0]);video.srcObject=stream;video.hidden=false;await video.play();
   for(const track of stream.getVideoTracks())track.addEventListener('ended',()=>{if(!closed&&view==='camera')cameraError({name:'NotReadableError'});});
-  setView('camera');$('capture').disabled=false;renderShots();hint('책장을 비추고 촬영을 누른 뒤, 여러 장을 찍고 완료를 눌러 주세요.');layout();
+  setView('camera');$('capture').disabled=false;renderShots();hint('라벨 글자가 또렷하게 보이도록 가까이(한 장에 15~20권) 비추고 촬영을 눌러 주세요.');layout();
  }catch(error){setView('camera');cameraError(error);}finally{connecting=false;$('retry').disabled=false;}
 }
-function captureShot(){
- if(view!=='camera'||busy||!cameraReady())return;
+async function useHighestResolution(track){
+ const caps=track?.getCapabilities?.()||{};
+ if(!caps.width?.max||!caps.height?.max)return;
+ try{await track.applyConstraints({width:{ideal:caps.width.max},height:{ideal:caps.height.max}});}catch{/* Keep the opened stream when the device refuses its own maximum. */}
+}
+// A still photo uses the full sensor; a preview frame is limited to the video size.
+async function takeStill(){
+ const track=stream?.getVideoTracks()[0];
+ if(track&&'ImageCapture' in window){
+  try{
+   const capture=new ImageCapture(track),caps=await capture.getPhotoCapabilities();
+   const settings=caps.imageWidth?.max&&caps.imageHeight?.max?{imageWidth:caps.imageWidth.max,imageHeight:caps.imageHeight.max}:{};
+   const blob=await capture.takePhoto(settings);
+   const bitmap=await createImageBitmap(blob,{imageOrientation:'from-image'});
+   try{return canvasesFromSource(bitmap);}finally{bitmap.close?.();}
+  }catch{/* Fall back to the preview frame. */}
+ }
+ return canvasesFromSource(video);
+}
+let capturing=false;
+async function captureShot(){
+ if(view!=='camera'||busy||capturing||!cameraReady())return;
  if(shots.length>=MAX_SHOTS){hint(`한 번에 ${MAX_SHOTS}장까지 찍을 수 있습니다. 완료를 눌러 주세요.`);return;}
- shots.push(canvasesFromSource(video));renderShots();hint(`${shots.length}장을 찍었습니다. 더 찍거나 완료를 눌러 주세요.`);
+ capturing=true;$('capture').disabled=true;hint('촬영 중입니다. 움직이지 말아 주세요.');
+ try{
+  const shot=await takeStill();
+  if(view!=='camera')return;
+  shots.push(shot);renderShots();
+  hint(`${shots.length}장을 찍었습니다 (${shot.native.width}×${shot.native.height}). 더 찍거나 완료를 눌러 주세요.`);
+ }finally{capturing=false;$('capture').disabled=view!=='camera'||!cameraReady();}
 }
 $('add-images').onclick=()=>$('image-files').click();
 $('image-files').onchange=async event=>{
