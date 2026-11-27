@@ -1,7 +1,10 @@
-import {prepareLine,improveCameraFocus,detectionTiles,analyzeShelf} from './image-preparation.mjs';
+import {prepareLine,improveCameraFocus,detectionTiles,analyzeShelf,inspectShelf} from './image-preparation.mjs';
 import {decreasingBooks,refineBookEdges} from './camera-core.mjs';
 import {recognizeLabels} from './recognition.mjs';
-import {formatCallNumber} from './labels.mjs';
+import {formatCallNumber,isFullClass,isAuthor} from './labels.mjs';
+import {createPaddleReader} from './paddle-ocr.mjs';
+import {readShelfLabels} from './shelf-reader.mjs';
+import {loadTemplates} from './jamo-shape.mjs';
 const $=id=>document.getElementById(id),video=$('camera'),overlay=$('overlay'),context=overlay.getContext('2d');
 const nativeFrame=document.createElement('canvas'),nativeContext=nativeFrame.getContext('2d');
 const snapshot=document.createElement('canvas'),snapshotContext=snapshot.getContext('2d',{willReadFrequently:true});
@@ -102,6 +105,36 @@ async function getWorker(){
  workerPromise=(async()=>{await withTimeout(loadOCR());const pending=window.Tesseract.createWorker('kor+eng',1);pending.then(w=>{if(generation!==workerGeneration||closed)w.terminate();}).catch(()=>{});const created=await withTimeout(pending);if(generation!==workerGeneration||closed){await created.terminate();throw Error('인식 세션이 변경되었습니다.');}await created.setParameters({tessedit_pageseg_mode:'6'});worker=created;return created;})();
  try{return await workerPromise;}catch(error){workerGeneration++;throw error;}finally{workerPromise=null;}
 }
+const ORT_BASE='https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/';
+let paddlePromise=null;
+function loadOrt(){
+ if(window.ort)return Promise.resolve(window.ort);
+ return new Promise((resolve,reject)=>{const script=document.createElement('script');script.src=ORT_BASE+'ort.min.js';script.onload=()=>resolve(window.ort);script.onerror=()=>{script.remove();reject(Error('인식 엔진 다운로드를 확인해 주세요.'));};document.head.append(script);});
+}
+function getPaddle(){
+ paddlePromise=paddlePromise||(async()=>{
+  const ort=await loadOrt();
+  ort.env.wasm.wasmPaths=ORT_BASE;
+  ort.env.wasm.numThreads=self.crossOriginIsolated?Math.min(4,navigator.hardwareConcurrency||1):1;
+  const [dictText,templates]=await Promise.all([fetch('models/korean_dict.txt').then(r=>r.text()),fetch('jamo-templates.json').then(r=>r.json())]);
+  const reader=await createPaddleReader({ort,detModel:'models/det.onnx',recModel:'models/korean_rec.onnx',dictText});
+  return {reader,templates:loadTemplates(templates)};
+ })();
+ paddlePromise.catch(()=>{paddlePromise=null;});
+ return paddlePromise;
+}
+async function readWithPaddle(native,image,isCurrent){
+ const {reader,templates}=await withTimeout(getPaddle());
+ if(!isCurrent())return null;
+ const ratio=native.width/snapshot.width,band=inspectShelf(snapshot).band;
+ const photo=nativeContext.getImageData(0,0,native.width,native.height);
+ const found=await readShelfLabels(reader,photo,{band:band&&band.map(v=>v*ratio),templates,isCurrent});
+ if(!isCurrent())return null;
+ return found.map((b,i)=>{
+  const box=b.box.map(v=>Math.round(v/ratio));
+  return {id:`V${String(i+1).padStart(2,'0')}`,classification:b.classification,author:b.author,volume:b.volume||'',copy:b.copy||'',bbox:box,labelBox:box,confidence:1,confirmed:false,uncertain:!!b.uncertain||!isFullClass(b.classification)||!isAuthor(b.author||'')};
+ });
+}
 async function resetWorker(){workerGeneration++;const previous=worker;worker=null;workerPromise=null;if(previous)await previous.terminate();}
 function showPreview(snap){
  overlay.hidden=false;overlay.width=snap.width;overlay.height=snap.height;
@@ -136,8 +169,13 @@ function resultCard(snap,books){
 async function processFrame(native,snap,token){
  nativeFrame.width=native.width;nativeFrame.height=native.height;nativeContext.drawImage(native,0,0);
  snapshot.width=snap.width;snapshot.height=snap.height;snapshotContext.drawImage(snap,0,0);
- const engine=await getWorker();if(token!==job||document.hidden)return null;
- const image=snapshotContext.getImageData(0,0,snapshot.width,snapshot.height),encoded=snapshot.toDataURL('image/png');
+ const isCurrent=()=>token===job&&!document.hidden;
+ const image=snapshotContext.getImageData(0,0,snapshot.width,snapshot.height);
+ const paddle=await readWithPaddle(native,image,isCurrent).catch(error=>{console.warn('PaddleOCR',error);return [];});
+ if(!isCurrent())return null;
+ if(paddle&&paddle.length>=2)return refineBookEdges(paddle,image);
+ const engine=await getWorker();if(!isCurrent())return null;
+ const encoded=snapshot.toDataURL('image/png');
  const prepare=(book,part,variant)=>prepareLine(nativeFrame,book,part,image.width,undefined,variant);
  prepare.tiles=()=>detectionTiles(nativeFrame,image.width);prepare.shelf=()=>analyzeShelf(snapshot,undefined,nativeFrame);
  const labels=await withTimeout(recognizeLabels(engine,encoded,image.width,image.height,()=>token===job&&!document.hidden,prepare));
@@ -152,7 +190,7 @@ async function processBatch(frames){
  try{
   for(let i=0;i<frames.length;i++){
    if(token!==job||document.hidden)return;
-   hint(`${i+1}/${frames.length}장 읽고 있습니다.`);
+   hint(i||paddlePromise?`${i+1}/${frames.length}장 읽고 있습니다.`:`인식 모델(약 18MB)을 내려받고 ${i+1}/${frames.length}장을 읽고 있습니다.`);
    showPreview(frames[i].snapshot);
    const books=await processFrame(frames[i].native,frames[i].snapshot,token);
    if(token!==job||books==null)return;
